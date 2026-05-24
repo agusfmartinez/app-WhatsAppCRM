@@ -20,6 +20,7 @@ import Contacts from './pages/Contacts.jsx';
 import Campaigns from './pages/Campaigns.jsx';
 import Inbox from './pages/Inbox.jsx';
 import Reports from './pages/Reports.jsx';
+import Templates from './pages/Templates.jsx';
 import Settings from './pages/Settings.jsx';
 import Login from './pages/Login.jsx';
 import Pending from './pages/Pending.jsx';
@@ -224,6 +225,7 @@ const CRM_ROUTES = (
     <Route path="inbox" element={<Inbox />} />
     <Route path="campaigns" element={<Campaigns />} />
     <Route path="reports" element={<Reports />} />
+    <Route path="templates" element={<Templates />} />
     <Route path="settings" element={<Settings />} />
   </>
 );

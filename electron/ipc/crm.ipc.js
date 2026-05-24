@@ -37,7 +37,7 @@ function initCrm(ipcMain, waManager) {
 
   ipcMain.handle('crm:contacts:list', (_e, { search = '', tagId = null } = {}) => {
     let sql = `
-      SELECT c.id, c.name, c.phone, c.email, c.company, c.notes, c.created_at, c.updated_at,
+      SELECT c.id, c.name, c.phone, c.email, c.company, c.notes, c.kapso_id, c.wa_name, c.created_at, c.updated_at,
              GROUP_CONCAT(t.id || ':' || t.name || ':' || t.color) AS tags_raw
       FROM contacts c
       LEFT JOIN contact_tags ct ON ct.contact_id = c.id
@@ -61,7 +61,7 @@ function initCrm(ipcMain, waManager) {
 
   ipcMain.handle('crm:contacts:get', (_e, id) => {
     const row = first(`
-      SELECT c.id, c.name, c.phone, c.email, c.company, c.notes, c.created_at, c.updated_at,
+      SELECT c.id, c.name, c.phone, c.email, c.company, c.notes, c.kapso_id, c.wa_name, c.created_at, c.updated_at,
              GROUP_CONCAT(t.id || ':' || t.name || ':' || t.color) AS tags_raw
       FROM contacts c
       LEFT JOIN contact_tags ct ON ct.contact_id = c.id
@@ -147,10 +147,11 @@ function initCrm(ipcMain, waManager) {
     return { ...campaign, contacts };
   });
 
-  ipcMain.handle('crm:campaigns:create', (_e, { name, messageTemplate, contactIds = [] }) => {
+  ipcMain.handle('crm:campaigns:create', (_e, { name, templateName, templateLanguage = 'es', templateVariables = [], contactIds = [] }) => {
+    const variablesJson = JSON.stringify(templateVariables);
     const { lastInsertRowid: campaignId } = run(
-      `INSERT INTO campaigns (name, message_template, total_contacts) VALUES (?, ?, ?)`,
-      [name, messageTemplate, contactIds.length]
+      `INSERT INTO campaigns (name, message_template, template_name, template_language, template_variables, total_contacts) VALUES (?, ?, ?, ?, ?, ?)`,
+      [name, templateName, templateName, templateLanguage, variablesJson, contactIds.length]
     );
     contactIds.forEach(cid => runBatch(
       `INSERT INTO campaign_contacts (campaign_id, contact_id) VALUES (?, ?)`, [campaignId, cid]
@@ -178,21 +179,40 @@ function initCrm(ipcMain, waManager) {
     runBatch(`UPDATE campaigns SET status='sending' WHERE id=?`, [id]);
     saveDb();
 
+    // Delay between messages — read from settings (default 1000ms)
+    const delayRow = first(`SELECT value FROM settings WHERE key='campaign_delay'`);
+    const delayMs = Math.max(0, Number(delayRow?.value) || 1000);
+
+    const templateName = campaign.template_name || campaign.message_template;
+    const templateLanguage = campaign.template_language || 'es';
+
+    // Build body components from stored variables
+    let variables = [];
+    try { variables = JSON.parse(campaign.template_variables || '[]'); } catch {}
+    const components = variables.length
+      ? [{ type: 'body', parameters: variables.map(v => ({ type: 'text', text: String(v) })) }]
+      : [];
+
     let sent = 0;
     let errors = 0;
-    for (const row of contacts) {
+    for (let i = 0; i < contacts.length; i++) {
+      const row = contacts[i];
       try {
-        const res = await waManager.sendMessage(row.phone, campaign.message_template);
+        const res = await waManager.sendTemplate(row.phone, templateName, templateLanguage, components);
         if (res.ok) {
           runBatch(`UPDATE campaign_contacts SET status='sent', sent_at=datetime('now') WHERE id=?`, [row.cc_id]);
           sent++;
         } else {
-          runBatch(`UPDATE campaign_contacts SET status='error', error=? WHERE id=?`, [res.error ?? 'Unknown error', row.cc_id]);
+          runBatch(`UPDATE campaign_contacts SET status='error', error=? WHERE id=?`, [res.error ?? 'Error desconocido', row.cc_id]);
           errors++;
         }
       } catch (err) {
         runBatch(`UPDATE campaign_contacts SET status='error', error=? WHERE id=?`, [err.message, row.cc_id]);
         errors++;
+      }
+      // Delay between messages (skip after last one)
+      if (delayMs > 0 && i < contacts.length - 1) {
+        await new Promise(r => setTimeout(r, delayMs));
       }
     }
 
@@ -200,49 +220,6 @@ function initCrm(ipcMain, waManager) {
     saveDb();
 
     return { ok: true, sent, errors };
-  });
-
-  // ─── Conversations ────────────────────────────────────────────────────────
-
-  ipcMain.handle('crm:conversations:list', () =>
-    all(`
-      SELECT cv.id, cv.status, cv.last_message_at, cv.created_at,
-             c.name AS contact_name, c.phone AS contact_phone
-      FROM conversations cv JOIN contacts c ON c.id = cv.contact_id
-      ORDER BY cv.last_message_at DESC
-    `)
-  );
-
-  ipcMain.handle('crm:conversations:get', (_e, id) =>
-    first(`
-      SELECT cv.*, c.name AS contact_name, c.phone AS contact_phone
-      FROM conversations cv JOIN contacts c ON c.id = cv.contact_id
-      WHERE cv.id = ?
-    `, [id])
-  );
-
-  // ─── Messages ─────────────────────────────────────────────────────────────
-
-  ipcMain.handle('crm:messages:list', (_e, conversationId) =>
-    all(`SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC`, [conversationId])
-  );
-
-  ipcMain.handle('crm:messages:send', async (_e, conversationId, content) => {
-    const conv = first(`SELECT * FROM conversations WHERE id = ?`, [conversationId]);
-    if (!conv) return { ok: false, error: 'Conversation not found' };
-    const contact = first(`SELECT * FROM contacts WHERE id = ?`, [conv.contact_id]);
-    if (!contact) return { ok: false, error: 'Contact not found' };
-
-    const res = await waManager.sendMessage(contact.phone, content);
-    if (!res.ok) return res;
-
-    const { lastInsertRowid: id } = run(
-      `INSERT INTO messages (conversation_id, content, direction, status, sent_at) VALUES (?, ?, 'out', 'sent', datetime('now'))`,
-      [conversationId, content]
-    );
-    runBatch(`UPDATE conversations SET last_message_at=datetime('now') WHERE id=?`, [conversationId]);
-    saveDb();
-    return { ok: true, id };
   });
 
   // ─── Settings ─────────────────────────────────────────────────────────────
@@ -265,10 +242,103 @@ function initCrm(ipcMain, waManager) {
 
   // ─── WhatsApp ─────────────────────────────────────────────────────────────
 
+  // ── WhatsApp: connection ──────────────────────────────────────────────────
   ipcMain.handle('crm:whatsapp:status', () => waManager.getStatus());
   ipcMain.handle('crm:whatsapp:connect', async (_e, config) => waManager.connect(config));
   ipcMain.handle('crm:whatsapp:disconnect', async () => waManager.disconnect());
   ipcMain.handle('crm:whatsapp:providers', () => waManager.listProviders());
+  ipcMain.handle('crm:whatsapp:detect-numbers', async (_e, apiKey) => {
+    const { KapsoAdapter } = require('../whatsapp/providers/KapsoAdapter');
+    return KapsoAdapter.fetchPhoneNumbers(apiKey);
+  });
+
+  // ── WhatsApp: messages ────────────────────────────────────────────────────
+  ipcMain.handle('crm:whatsapp:list-messages', async (_e, opts) => waManager.listMessages(opts));
+  ipcMain.handle('crm:whatsapp:send-message', async (_e, to, body) => waManager.sendMessage(to, body));
+
+  // ── WhatsApp: conversations ───────────────────────────────────────────────
+  ipcMain.handle('crm:whatsapp:list-conversations', async (_e, opts) => waManager.listConversations(opts));
+  ipcMain.handle('crm:whatsapp:get-conversation', async (_e, id) => waManager.getConversation(id));
+
+  // ── WhatsApp: templates ───────────────────────────────────────────────────
+  ipcMain.handle('crm:whatsapp:templates', async () => waManager.getTemplates());
+  ipcMain.handle('crm:whatsapp:create-template', async (_e, data) => waManager.createTemplate(data));
+  ipcMain.handle('crm:whatsapp:delete-template', async (_e, name) => waManager.deleteTemplate(name));
+
+  // ── WhatsApp: contacts (WA) ───────────────────────────────────────────────
+  ipcMain.handle('crm:whatsapp:wa-contacts', async (_e, opts) => waManager.listWaContacts(opts));
+
+  // ── WhatsApp: business profile ────────────────────────────────────────────
+  ipcMain.handle('crm:whatsapp:business-profile', async () => waManager.getBusinessProfile());
+  ipcMain.handle('crm:whatsapp:update-business-profile', async (_e, data) => waManager.updateBusinessProfile(data));
+
+  // ── WhatsApp: phone number ────────────────────────────────────────────────
+  ipcMain.handle('crm:whatsapp:phone-details', async () => waManager.getPhoneNumberDetails());
+
+  // ── WhatsApp: block users ─────────────────────────────────────────────────
+  ipcMain.handle('crm:whatsapp:blocked-users', async () => waManager.listBlockedUsers());
+  ipcMain.handle('crm:whatsapp:block-user', async (_e, phone) => waManager.blockUser(phone));
+  ipcMain.handle('crm:whatsapp:unblock-user', async (_e, phone) => waManager.unblockUser(phone));
+
+  // ── Sync: Kapso contacts → local DB ──────────────────────────────────────
+  ipcMain.handle('crm:sync-kapso-contacts', async () => {
+    // 1. Pull all Kapso contacts (paginated)
+    let kapsoContacts = [];
+    let after = null;
+    do {
+      const res = await waManager.listWaContacts({ limit: 100, after });
+      if (!res?.ok) return { ok: false, error: res?.error || 'Error fetching Kapso contacts' };
+      kapsoContacts = kapsoContacts.concat(res.data || []);
+      after = res.paging?.cursors?.after && res.paging?.next ? res.paging.cursors.after : null;
+    } while (after);
+
+    let created = 0, updated = 0, unchanged = 0;
+
+    for (const kc of kapsoContacts) {
+      const phone = String(kc.wa_id || '').replace(/[^0-9]/g, '');
+      if (!phone) continue;
+
+      const waName = kc.profile_name || kc.display_name || null;
+      const kapsoId = kc.id || null;
+
+      // Build alternate phone variants (Argentina: 549XXXXXXXXX ↔ 54XXXXXXXXX)
+      const phoneVariants = [phone];
+      if (phone.startsWith('549') && phone.length === 13) {
+        phoneVariants.push('54' + phone.slice(3));       // 5491134940534 → 541134940534
+      } else if (phone.startsWith('54') && !phone.startsWith('549') && phone.length === 12) {
+        phoneVariants.push('549' + phone.slice(2));      // 541134940534 → 5491134940534
+      }
+
+      const normalize = `REPLACE(REPLACE(REPLACE(phone, '+', ''), '-', ''), ' ', '')`;
+      const placeholders = phoneVariants.map(() => '?').join(', ');
+      const existing = first(
+        `SELECT * FROM contacts WHERE ${normalize} IN (${placeholders})`,
+        phoneVariants
+      );
+
+      if (existing) {
+        // Update kapso_id and wa_name if changed
+        if (existing.kapso_id !== kapsoId || existing.wa_name !== waName) {
+          run(
+            `UPDATE contacts SET kapso_id=?, wa_name=?, updated_at=datetime('now') WHERE id=?`,
+            [kapsoId, waName, existing.id]
+          );
+          updated++;
+        } else {
+          unchanged++;
+        }
+      } else {
+        // Create new contact from Kapso data
+        run(
+          `INSERT INTO contacts (name, phone, kapso_id, wa_name) VALUES (?, ?, ?, ?)`,
+          [waName || phone, phone, kapsoId, waName]
+        );
+        created++;
+      }
+    }
+
+    return { ok: true, total: kapsoContacts.length, created, updated, unchanged };
+  });
 
   // ─── Dashboard stats ──────────────────────────────────────────────────────
 

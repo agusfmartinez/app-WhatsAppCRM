@@ -20,11 +20,19 @@ function CampaignWizard({ onClose, onCreated }) {
   const [step, setStep] = useState(1);
   const [contacts, setContacts] = useState([]);
   const [selected, setSelected] = useState(new Set());
-  const [form, setForm] = useState({ name: '', message: '' });
+  const [form, setForm] = useState({ name: '', templateName: '', templateLanguage: 'es_AR', variables: [] });
+  const [kapsoTemplates, setKapsoTemplates] = useState([]);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
     window.api?.contacts?.list({}).then(c => setContacts(c || [])).catch(() => {});
+    // Try to fetch templates from Kapso
+    setLoadingTemplates(true);
+    window.api?.whatsapp?.getTemplates?.()
+      .then(r => { if (r?.ok) setKapsoTemplates(r.templates || []); })
+      .catch(() => {})
+      .finally(() => setLoadingTemplates(false));
   }, []);
 
   const toggleAll = () => {
@@ -37,7 +45,9 @@ function CampaignWizard({ onClose, onCreated }) {
     try {
       const res = await window.api?.campaigns?.create({
         name: form.name,
-        messageTemplate: form.message,
+        templateName: form.templateName,
+        templateLanguage: form.templateLanguage,
+        templateVariables: form.variables,
         contactIds: [...selected],
       });
       if (res?.ok) { onCreated(); onClose(); }
@@ -65,7 +75,7 @@ function CampaignWizard({ onClose, onCreated }) {
                 {s < 3 && <div className={`h-px w-8 ${s < step ? 'bg-green-600' : 'bg-gray-700'}`} />}
               </div>
             ))}
-            <span className="ml-2 text-xs text-gray-400">{['Contactos', 'Mensaje', 'Preview'][step - 1]}</span>
+            <span className="ml-2 text-xs text-gray-400">{['Contactos', 'Template', 'Confirmar'][step - 1]}</span>
           </div>
 
           {step === 1 && (
@@ -106,16 +116,107 @@ function CampaignWizard({ onClose, onCreated }) {
                   className="mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
+              {/* Template selector — from Kapso API or manual */}
+              {kapsoTemplates.length > 0 ? (
+                <label className="block">
+                  <span className="text-xs text-gray-400 uppercase tracking-wide">Template *</span>
+                  <select
+                    value={form.templateName}
+                    onChange={e => {
+                      const tpl = kapsoTemplates.find(t => t.name === e.target.value);
+                      // Auto-detect variables from body component
+                      let autoVars = [];
+                      if (tpl) {
+                        const body = tpl.components?.find(c => c.type === 'BODY');
+                        const matches = body?.text?.match(/\{\{(\d+)\}\}/g) || [];
+                        const count = matches.length ? Math.max(...matches.map(m => parseInt(m.replace(/\D/g,'')))) : 0;
+                        autoVars = Array(count).fill('');
+                      }
+                      setForm(f => ({
+                        ...f,
+                        templateName: e.target.value,
+                        templateLanguage: tpl?.language || f.templateLanguage,
+                        variables: autoVars,
+                      }));
+                    }}
+                    className="mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  >
+                    <option value="">Seleccionar template…</option>
+                    {kapsoTemplates.map(t => (
+                      <option key={t.name} value={t.name} disabled={t.status !== 'APPROVED'}>
+                        {t.name} — {t.status ?? '?'} {t.status !== 'APPROVED' ? '(no disponible)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <label className="block">
+                  <span className="text-xs text-gray-400 uppercase tracking-wide">
+                    Template de Meta * {loadingTemplates ? '(cargando…)' : '(manual)'}
+                  </span>
+                  <input
+                    value={form.templateName}
+                    onChange={e => setForm(f => ({ ...f, templateName: e.target.value.trim() }))}
+                    placeholder="testing_template1"
+                    className="mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 font-mono focus:outline-none focus:ring-1 focus:ring-green-500"
+                  />
+                  <span className="text-[11px] text-gray-500 mt-1 block">Exactamente como figura en el panel de Kapso / Meta Business.</span>
+                </label>
+              )}
+
               <label className="block">
-                <span className="text-xs text-gray-400 uppercase tracking-wide">Mensaje *</span>
-                <textarea
-                  value={form.message}
-                  onChange={e => setForm(f => ({ ...f, message: e.target.value }))}
-                  rows={5}
-                  placeholder="Escribí el mensaje que se enviará a los contactos..."
-                  className="mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-green-500 resize-none"
-                />
+                <span className="text-xs text-gray-400 uppercase tracking-wide">Idioma</span>
+                <select
+                  value={form.templateLanguage}
+                  onChange={e => setForm(f => ({ ...f, templateLanguage: e.target.value }))}
+                  className="mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-green-500"
+                >
+                  <option value="es">es — Español</option>
+                  <option value="es_AR">es_AR — Español (Argentina)</option>
+                  <option value="es_MX">es_MX — Español (México)</option>
+                  <option value="en_US">en_US — English (US)</option>
+                  <option value="pt_BR">pt_BR — Português (Brasil)</option>
+                </select>
               </label>
+
+              {/* Variables del template — {{1}}, {{2}}, etc. */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs text-gray-400 uppercase tracking-wide">Variables del template</span>
+                  <button
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, variables: [...f.variables, ''] }))}
+                    className="text-xs text-green-400 hover:text-green-300"
+                  >
+                    + Agregar variable
+                  </button>
+                </div>
+                {form.variables.length === 0 && (
+                  <p className="text-xs text-gray-600">Sin variables. Agregá una si el template usa {'{{1}}'}, {'{{2}}'}, etc.</p>
+                )}
+                {form.variables.map((v, i) => (
+                  <div key={i} className="flex items-center gap-2 mt-1.5">
+                    <span className="text-xs text-gray-500 font-mono w-8 shrink-0">{'{{' + (i + 1) + '}}'}</span>
+                    <input
+                      value={v}
+                      onChange={e => setForm(f => {
+                        const vars = [...f.variables];
+                        vars[i] = e.target.value;
+                        return { ...f, variables: vars };
+                      })}
+                      placeholder={`Valor para {{${i + 1}}}`}
+                      className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-green-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setForm(f => ({ ...f, variables: f.variables.filter((_, j) => j !== i) }))}
+                      className="text-gray-600 hover:text-red-400"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -124,12 +225,22 @@ function CampaignWizard({ onClose, onCreated }) {
               <div className="bg-gray-800 rounded-xl p-4 space-y-2 text-sm">
                 <div className="flex justify-between"><span className="text-gray-400">Campaña</span><span className="text-gray-100 font-medium">{form.name}</span></div>
                 <div className="flex justify-between"><span className="text-gray-400">Destinatarios</span><span className="text-gray-100 font-medium">{selected.size} contactos</span></div>
+                <div className="flex justify-between"><span className="text-gray-400">Template</span><span className="text-gray-100 font-mono font-medium">{form.templateName}</span></div>
+                <div className="flex justify-between"><span className="text-gray-400">Idioma</span><span className="text-gray-100">{form.templateLanguage}</span></div>
+                {form.variables.length > 0 && (
+                  <div>
+                    <span className="text-gray-400">Variables</span>
+                    {form.variables.map((v, i) => (
+                      <div key={i} className="flex justify-between mt-1 pl-2">
+                        <span className="text-gray-500 font-mono">{'{{' + (i + 1) + '}}'}</span>
+                        <span className="text-gray-200">"{v}"</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              <div className="bg-gray-800 rounded-xl p-4">
-                <div className="text-xs text-gray-400 mb-2 uppercase tracking-wide">Preview del mensaje</div>
-                <div className="bg-green-600 rounded-2xl rounded-tl-none px-4 py-2.5 text-sm text-white max-w-xs">
-                  {form.message || <span className="text-green-300 italic">Sin mensaje</span>}
-                </div>
+              <div className="bg-gray-800/60 border border-yellow-500/20 rounded-xl p-4 text-xs text-yellow-400">
+                Se enviará el template aprobado por Meta. El contenido exacto del mensaje está definido en el panel de Kapso / Meta Business Manager.
               </div>
             </div>
           )}
@@ -142,7 +253,7 @@ function CampaignWizard({ onClose, onCreated }) {
           {step < 3 ? (
             <button
               onClick={() => setStep(s => s + 1)}
-              disabled={step === 1 ? selected.size === 0 : !form.name || !form.message}
+              disabled={step === 1 ? selected.size === 0 : !form.name || !form.templateName}
               className="flex-1 py-2 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium text-white transition-colors"
             >
               Siguiente

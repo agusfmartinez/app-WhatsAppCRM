@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "mcp__plugin_context-mode_context-mode__ctx_batch_execute",
-      "mcp__plugin_context-mode_context-mode__ctx_search"
+      "mcp__plugin_context-mode_context-mode__ctx_search",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\HP\\\\Documents\\\\Agus\\\\Web\\\\agenteWhatsApp\\\\src\\\\services\" -File)"
     ]
   }
 }

@@ -6,10 +6,6 @@ const PROVIDERS = {
   // baileys: BaileysAdapter,
 };
 
-/**
- * Singleton manager. Holds the active provider instance.
- * onEvent(event) is called for every provider event → forwarded to renderer via IPC.
- */
 function createWhatsAppManager(onEvent) {
   let provider = null;
 
@@ -19,6 +15,12 @@ function createWhatsAppManager(onEvent) {
     provider.on('qr', (data) => onEvent({ type: 'qr', ...data }));
     provider.on('message', (data) => onEvent({ type: 'message', ...data }));
     provider.on('error', (data) => onEvent({ type: 'error', ...data }));
+  }
+
+  function _delegate(method, ...args) {
+    if (!provider) return Promise.resolve({ ok: false, error: 'No provider connected' });
+    if (typeof provider[method] !== 'function') return Promise.resolve({ ok: false, error: `Provider no soporta ${method}` });
+    return Promise.resolve(provider[method](...args));
   }
 
   return {
@@ -37,17 +39,8 @@ function createWhatsAppManager(onEvent) {
 
     async disconnect() {
       if (!provider) return { ok: true };
-      try {
-        await provider.disconnect();
-        return { ok: true };
-      } catch (err) {
-        return { ok: false, error: err.message };
-      }
-    },
-
-    async sendMessage(to, body) {
-      if (!provider) return { ok: false, error: 'No provider connected' };
-      return provider.sendMessage(to, body);
+      try { await provider.disconnect(); return { ok: true }; }
+      catch (err) { return { ok: false, error: err.message }; }
     },
 
     getStatus() {
@@ -55,9 +48,36 @@ function createWhatsAppManager(onEvent) {
       return provider.getStatus();
     },
 
-    listProviders() {
-      return Object.keys(PROVIDERS);
-    },
+    listProviders: () => Object.keys(PROVIDERS),
+
+    // Messages
+    sendMessage: (to, body) => _delegate('sendMessage', to, body),
+    sendTemplate: (to, name, lang, components) => _delegate('sendTemplate', to, name, lang, components),
+    listMessages: (opts) => _delegate('listMessages', opts),
+
+    // Conversations
+    listConversations: (opts) => _delegate('listConversations', opts),
+    getConversation: (id) => _delegate('getConversation', id),
+
+    // Contacts (WA)
+    listWaContacts: (opts) => _delegate('listWaContacts', opts),
+
+    // Templates
+    getTemplates: () => _delegate('getTemplates'),
+    createTemplate: (data) => _delegate('createTemplate', data),
+    deleteTemplate: (name) => _delegate('deleteTemplate', name),
+
+    // Business Profile
+    getBusinessProfile: () => _delegate('getBusinessProfile'),
+    updateBusinessProfile: (data) => _delegate('updateBusinessProfile', data),
+
+    // Phone Number
+    getPhoneNumberDetails: () => _delegate('getPhoneNumberDetails'),
+
+    // Block Users
+    listBlockedUsers: () => _delegate('listBlockedUsers'),
+    blockUser: (phone) => _delegate('blockUser', phone),
+    unblockUser: (phone) => _delegate('unblockUser', phone),
   };
 }
 

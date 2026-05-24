@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 const TAG_COLORS = ['#6b7280', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899'];
 
@@ -11,6 +12,9 @@ function TagBadge({ tag }) {
 }
 
 function ContactModal({ contact, tags, onSave, onClose }) {
+  // Contacts synced from Kapso have kapso_id — lock name + phone (no Kapso update endpoint)
+  const isKapso = !!contact?.kapso_id;
+
   const [form, setForm] = useState({
     name: contact?.name || '',
     phone: contact?.phone || '',
@@ -31,18 +35,40 @@ function ContactModal({ contact, tags, onSave, onClose }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md mx-4 shadow-2xl">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
-          <h2 className="text-base font-semibold text-white">{contact ? 'Editar contacto' : 'Nuevo contacto'}</h2>
+          <div>
+            <h2 className="text-base font-semibold text-white">{contact ? 'Editar contacto' : 'Nuevo contacto'}</h2>
+            {isKapso && (
+              <span className="text-[11px] text-green-400 flex items-center gap-1 mt-0.5">
+                <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.6 0 12 0zm5.9 8.6l-6.8 9c-.2.3-.5.4-.8.4s-.6-.1-.8-.4l-3.4-4.5c-.4-.5-.3-1.2.2-1.6.5-.4 1.2-.3 1.6.2l2.6 3.4 6-7.9c.4-.5 1.1-.6 1.6-.2.5.4.6 1.1.2 1.6z"/></svg>
+                Contacto de WhatsApp · nombre/teléfono bloqueados
+              </span>
+            )}
+          </div>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition-colors">
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
           </button>
         </div>
         <form onSubmit={submit} className="px-6 py-5 space-y-4">
-          {[['Nombre *', 'name', 'text', true], ['Teléfono *', 'phone', 'tel', true], ['Email', 'email', 'email', false], ['Empresa', 'company', 'text', false]].map(([label, key, type, req]) => (
+          {/* Name + Phone: locked for Kapso contacts */}
+          {[['Nombre *', 'name', 'text', !isKapso], ['Teléfono *', 'phone', 'tel', !isKapso]].map(([label, key, type, editable]) => (
             <label key={key} className="block">
               <span className="text-xs text-gray-400 uppercase tracking-wide">{label}</span>
               <input
                 type={type}
-                required={req}
+                required={!isKapso}
+                readOnly={!editable}
+                value={form[key]}
+                onChange={editable ? e => setForm(f => ({ ...f, [key]: e.target.value })) : undefined}
+                className={`mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none ${editable ? 'bg-gray-800 border-gray-700 text-gray-100 focus:ring-1 focus:ring-green-500' : 'bg-gray-900 border-gray-800 text-gray-500 cursor-not-allowed'}`}
+              />
+            </label>
+          ))}
+          {/* Email + Company: always editable */}
+          {[['Email', 'email', 'email'], ['Empresa', 'company', 'text']].map(([label, key, type]) => (
+            <label key={key} className="block">
+              <span className="text-xs text-gray-400 uppercase tracking-wide">{label}</span>
+              <input
+                type={type}
                 value={form[key]}
                 onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
                 className="mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-green-500"
@@ -84,12 +110,15 @@ function ContactModal({ contact, tags, onSave, onClose }) {
 }
 
 export default function Contacts() {
+  const navigate = useNavigate();
   const [contacts, setContacts] = useState([]);
   const [tags, setTags] = useState([]);
   const [search, setSearch] = useState('');
   const [filterTag, setFilterTag] = useState(null);
   const [modal, setModal] = useState(null); // null | 'new' | contact obj
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -103,6 +132,21 @@ export default function Contacts() {
   }, [search, filterTag]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Auto-sync from Kapso on first mount (background, non-blocking)
+  useEffect(() => {
+    const autoSync = async () => {
+      const status = await window.api?.whatsapp?.getStatus?.().catch(() => null);
+      if (status?.status !== 'connected') return;
+      const res = await window.api?.syncKapsoContacts?.().catch(() => null);
+      if (res?.ok && (res.created > 0 || res.updated > 0)) {
+        setSyncResult(res);
+        load(); // reload list with new/updated contacts
+      }
+    };
+    autoSync();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSave = async (form) => {
     if (modal === 'new') {
@@ -127,13 +171,46 @@ export default function Contacts() {
           <h1 className="text-2xl font-bold text-white">Contactos</h1>
           <p className="text-sm text-gray-400 mt-1">{contacts.length} contactos</p>
         </div>
-        <button
-          onClick={() => setModal('new')}
-          className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 text-sm font-medium text-white rounded-lg transition-colors"
-        >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>
-          Nuevo contacto
-        </button>
+        <div className="flex items-center gap-2">
+          {syncResult && syncResult.ok && (
+            <span className="text-xs text-green-400">
+              ✓ +{syncResult.created} nuevos, {syncResult.updated} actualizados
+            </span>
+          )}
+          {syncResult && !syncResult.ok && (
+            <span className="text-xs text-red-400" title={syncResult.error}>
+              ✗ {syncResult.error?.slice(0, 40)}
+            </span>
+          )}
+          <button
+            onClick={async () => {
+              setSyncing(true); setSyncResult(null);
+              try {
+                const res = await window.api?.syncKapsoContacts?.() ?? { ok: false, error: 'Sin respuesta del proceso principal' };
+                setSyncResult(res);
+                if (res?.ok) load();
+              } catch (err) {
+                setSyncResult({ ok: false, error: err.message || 'Error inesperado' });
+              } finally {
+                setSyncing(false);
+              }
+            }}
+            disabled={syncing}
+            className="flex items-center gap-1.5 px-3 py-2 border border-gray-700 hover:border-gray-600 text-sm text-gray-400 hover:text-gray-200 rounded-lg transition-colors disabled:opacity-40"
+          >
+            <svg className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            {syncing ? 'Sincronizando...' : 'Sync Kapso'}
+          </button>
+          <button
+            onClick={() => setModal('new')}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 text-sm font-medium text-white rounded-lg transition-colors"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>
+            Nuevo contacto
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -179,7 +256,12 @@ export default function Contacts() {
             <tbody className="divide-y divide-gray-700/50">
               {contacts.map(c => (
                 <tr key={c.id} className="hover:bg-gray-750 transition-colors">
-                  <td className="px-4 py-3 text-gray-100 font-medium">{c.name}</td>
+                  <td className="px-4 py-3">
+                    <div className="text-gray-100 font-medium">{c.name}</div>
+                    {c.wa_name && c.wa_name !== c.name && (
+                      <div className="text-[11px] text-gray-500">WA: {c.wa_name}</div>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-gray-400">{c.phone}</td>
                   <td className="px-4 py-3 text-gray-400">{c.company || '—'}</td>
                   <td className="px-4 py-3">
@@ -189,10 +271,24 @@ export default function Contacts() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1 justify-end">
+                      {/* Go to conversation — only Kapso contacts have conversations */}
+                      {c.kapso_id && (
+                        <button
+                          onClick={() => navigate('/inbox', { state: { filterPhone: c.phone } })}
+                          title="Ver conversación en Inbox"
+                          className="p-1.5 rounded-lg text-gray-500 hover:text-green-400 hover:bg-gray-700 transition-colors"
+                        >
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                        </button>
+                      )}
                       <button onClick={() => setModal(c)} className="p-1.5 rounded-lg text-gray-500 hover:text-gray-200 hover:bg-gray-700 transition-colors">
                         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                       </button>
-                      <button onClick={() => handleDelete(c.id)} className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-gray-700 transition-colors">
+                      <button
+                        onClick={() => handleDelete(c.id)}
+                        title="Eliminar del CRM local (no afecta Kapso)"
+                        className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-gray-700 transition-colors"
+                      >
                         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                       </button>
                     </div>

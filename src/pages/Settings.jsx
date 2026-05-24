@@ -6,6 +6,12 @@ const PROVIDERS = [
   { value: 'baileys', label: 'Baileys', desc: 'Librería open-source (no oficial)' },
 ];
 
+const PROVIDER_FIELDS = {
+  kapso:   { apiKeyLabel: 'API Key (X-API-Key)', apiUrlLabel: 'Phone Number ID', apiUrlPlaceholder: '12013619638', showBusinessId: true },
+  waha:    { apiKeyLabel: 'API Key', apiUrlLabel: 'URL del servidor WAHA', apiUrlPlaceholder: 'http://localhost:3000', showBusinessId: false },
+  baileys: { apiKeyLabel: '—', apiUrlLabel: '—', apiUrlPlaceholder: '', showBusinessId: false },
+};
+
 function Section({ title, children }) {
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 space-y-5">
@@ -30,10 +36,15 @@ export default function Settings() {
   const [provider, setProvider] = useState('kapso');
   const [apiKey, setApiKey] = useState('');
   const [apiUrl, setApiUrl] = useState('');
+  const [businessAccountId, setBusinessAccountId] = useState('');
   const [delay, setDelay] = useState('2000');
   const [batchSize, setBatchSize] = useState('10');
   const [saving, setSaving] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [detecting, setDetecting] = useState(false);
+  const [detectedNumbers, setDetectedNumbers] = useState([]);
+  const [businessProfile, setBusinessProfile] = useState(null);
+  const [phoneDetails, setPhoneDetails] = useState(null);
   const [msg, setMsg] = useState(null);
 
   useEffect(() => {
@@ -44,12 +55,26 @@ export default function Settings() {
       if (s.wa_provider) setProvider(s.wa_provider);
       if (s.wa_api_key) setApiKey(s.wa_api_key);
       if (s.wa_api_url) setApiUrl(s.wa_api_url);
+      if (s.wa_business_account_id) setBusinessAccountId(s.wa_business_account_id);
       if (s.campaign_delay) setDelay(String(s.campaign_delay));
       if (s.campaign_batch) setBatchSize(String(s.campaign_batch));
     }).catch(() => {});
 
-    const handler = (e) => { if (e.type === 'status') setWaStatus(e.status); };
+    const handler = (e) => {
+      if (e.type === 'status') {
+        setWaStatus(e.status);
+        if (e.status === 'connected') {
+          window.api?.whatsapp?.getBusinessProfile?.().then(r => { if (r?.ok) setBusinessProfile(r.data ?? r); }).catch(() => {});
+          window.api?.whatsapp?.getPhoneNumberDetails?.().then(r => { if (r?.ok !== false) setPhoneDetails(r); }).catch(() => {});
+        }
+      }
+    };
     window.api?.onWhatsAppEvent?.(handler);
+    // Load profile if already connected
+    if (waStatus === 'connected') {
+      window.api?.whatsapp?.getBusinessProfile?.().then(r => { if (r?.ok) setBusinessProfile(r.data ?? r); }).catch(() => {});
+      window.api?.whatsapp?.getPhoneNumberDetails?.().then(r => { if (r?.ok !== false) setPhoneDetails(r); }).catch(() => {});
+    }
     return () => window.api?.offWhatsAppEvent?.(handler);
   }, []);
 
@@ -65,6 +90,7 @@ export default function Settings() {
         window.api?.settings?.set('wa_provider', provider),
         window.api?.settings?.set('wa_api_key', apiKey),
         window.api?.settings?.set('wa_api_url', apiUrl),
+        window.api?.settings?.set('wa_business_account_id', businessAccountId),
         window.api?.settings?.set('campaign_delay', Number(delay)),
         window.api?.settings?.set('campaign_batch', Number(batchSize)),
       ]);
@@ -79,7 +105,11 @@ export default function Settings() {
   const handleConnect = async () => {
     setConnecting(true);
     try {
-      const res = await window.api?.whatsapp?.connect({ providerName: provider, config: { apiKey, apiUrl } });
+      // Map fields to provider-specific config
+      const config = provider === 'kapso'
+        ? { apiKey, phoneNumberId: apiUrl, businessAccountId }
+        : { apiKey, apiUrl };
+      const res = await window.api?.whatsapp?.connect({ providerName: provider, config });
       if (res?.ok) showMsg('Conectado a WhatsApp');
       else showMsg(res?.error || 'Error al conectar', 'error');
     } catch (err) {
@@ -121,24 +151,88 @@ export default function Settings() {
             ))}
           </div>
         </Field>
-        <Field label="API Key">
-          <input
-            type="password"
-            value={apiKey}
-            onChange={e => setApiKey(e.target.value)}
-            placeholder="sk-..."
-            className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-green-500"
-          />
-        </Field>
-        <Field label="API URL (opcional)">
-          <input
-            type="url"
-            value={apiUrl}
-            onChange={e => setApiUrl(e.target.value)}
-            placeholder="https://tu-instancia.com"
-            className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-green-500"
-          />
-        </Field>
+        {PROVIDER_FIELDS[provider]?.apiKeyLabel !== '—' && (
+          <Field label={PROVIDER_FIELDS[provider]?.apiKeyLabel ?? 'API Key'}>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={apiKey}
+                onChange={e => setApiKey(e.target.value)}
+                placeholder="••••••••"
+                className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-green-500"
+              />
+              {provider === 'kapso' && (
+                <button
+                  type="button"
+                  disabled={!apiKey || detecting}
+                  onClick={async () => {
+                    setDetecting(true);
+                    const res = await window.api?.whatsapp?.detectNumbers?.(apiKey);
+                    setDetecting(false);
+                    if (!res?.ok) return showMsg(res?.error || 'Error detectando números', 'error');
+                    const nums = res.phoneNumbers || [];
+                    setDetectedNumbers(nums);
+                    if (nums.length === 1) {
+                      setApiUrl(nums[0].phone_number_id);
+                      setBusinessAccountId(nums[0].business_account_id);
+                      showMsg(`Detectado: ${nums[0].display_phone_number} (${nums[0].verified_name})`);
+                    } else if (nums.length === 0) {
+                      showMsg('Sin números en este proyecto', 'error');
+                    }
+                  }}
+                  className="px-3 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 disabled:opacity-40 text-xs text-gray-200 shrink-0 transition-colors"
+                >
+                  {detecting ? '...' : 'Detectar'}
+                </button>
+              )}
+            </div>
+            {/* Multiple numbers selector */}
+            {detectedNumbers.length > 1 && (
+              <div className="mt-2 space-y-1">
+                <span className="text-[11px] text-gray-400">Seleccioná un número:</span>
+                {detectedNumbers.map(n => (
+                  <button
+                    key={n.phone_number_id}
+                    type="button"
+                    onClick={() => {
+                      setApiUrl(n.phone_number_id);
+                      setBusinessAccountId(n.business_account_id);
+                      setDetectedNumbers([]);
+                      showMsg(`Seleccionado: ${n.display_phone_number}`);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-gray-100 transition-colors"
+                  >
+                    <span className="font-medium">{n.display_phone_number}</span>
+                    <span className="text-gray-400 ml-2 text-xs">{n.verified_name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </Field>
+        )}
+        {PROVIDER_FIELDS[provider]?.apiUrlLabel !== '—' && (
+          <Field label={PROVIDER_FIELDS[provider]?.apiUrlLabel ?? 'URL / ID'}>
+            <input
+              type="text"
+              value={apiUrl}
+              onChange={e => setApiUrl(e.target.value)}
+              placeholder={PROVIDER_FIELDS[provider]?.apiUrlPlaceholder ?? ''}
+              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-green-500"
+            />
+          </Field>
+        )}
+        {PROVIDER_FIELDS[provider]?.showBusinessId && (
+          <Field label="Business Account ID (WABA ID)">
+            <input
+              type="text"
+              value={businessAccountId}
+              onChange={e => setBusinessAccountId(e.target.value)}
+              placeholder="2750692328664321"
+              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-green-500"
+            />
+            <span className="text-[11px] text-gray-500 mt-1 block">Necesario para listar templates. Está en el panel de Kapso junto a tu Phone Number ID.</span>
+          </Field>
+        )}
 
         <div className="flex items-center gap-3 pt-1">
           <div className="flex items-center gap-2 flex-1">
@@ -191,6 +285,39 @@ export default function Settings() {
           <div className="flex justify-between"><span className="text-gray-400">Sistema</span><span className="text-gray-200">{appInfo?.os || '—'}</span></div>
         </div>
       </Section>
+
+      {/* WhatsApp Business Profile */}
+      {waStatus === 'connected' && (
+        <Section title="Perfil de WhatsApp Business">
+          {phoneDetails && (
+            <div className="space-y-2 text-sm border-b border-gray-700 pb-4 mb-4">
+              <div className="flex justify-between"><span className="text-gray-400">Número</span><span className="text-gray-200 font-mono">{phoneDetails.display_phone_number || phoneDetails.verified_name || '—'}</span></div>
+              <div className="flex justify-between"><span className="text-gray-400">Calidad</span>
+                <span className={`font-medium ${phoneDetails.quality_rating === 'GREEN' ? 'text-green-400' : phoneDetails.quality_rating === 'YELLOW' ? 'text-yellow-400' : 'text-red-400'}`}>
+                  {phoneDetails.quality_rating || '—'}
+                </span>
+              </div>
+              <div className="flex justify-between"><span className="text-gray-400">Estado verificación</span><span className="text-gray-200">{phoneDetails.code_verification_status || '—'}</span></div>
+            </div>
+          )}
+          {businessProfile && (
+            <div className="space-y-3">
+              {[['Descripción', 'about'], ['Dirección', 'address'], ['Email', 'email'], ['Sitio web', 'websites']].map(([label, key]) => {
+                const val = key === 'websites' ? businessProfile.websites?.[0] : businessProfile[key];
+                return val ? (
+                  <div key={key} className="flex justify-between text-sm">
+                    <span className="text-gray-400">{label}</span>
+                    <span className="text-gray-200 text-right max-w-xs truncate">{val}</span>
+                  </div>
+                ) : null;
+              })}
+            </div>
+          )}
+          {!businessProfile && !phoneDetails && (
+            <p className="text-xs text-gray-500">Conectate a WhatsApp para ver el perfil del negocio.</p>
+          )}
+        </Section>
+      )}
 
       <button
         onClick={saveSettings}

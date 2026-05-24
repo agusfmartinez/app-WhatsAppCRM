@@ -258,10 +258,8 @@ app.whenReady().then(async () => {
     appLogger.error(`DB init failed: ${err.message}`);
   }
 
-  createSplash();
-  createWindow();
-  initAutoUpdate();
-
+  // Register IPC handlers BEFORE creating the window to avoid race conditions
+  // (renderer can call IPC immediately after load, before createWindow returns)
   const waManager = createWhatsAppManager((event) => {
     try {
       if (win && !win.isDestroyed()) win.webContents.send('whatsapp:event', event);
@@ -270,6 +268,10 @@ app.whenReady().then(async () => {
 
   initCrm(ipcMain, waManager);
   logIpc('info', 'CRM IPC registered');
+
+  createSplash();
+  createWindow();
+  initAutoUpdate();
 
   win.once('ready-to-show', () => {
     if (splash) splash.close();

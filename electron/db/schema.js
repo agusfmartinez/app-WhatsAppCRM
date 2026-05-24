@@ -6,6 +6,8 @@ const SCHEMA_SQL = `
     email TEXT,
     company TEXT,
     notes TEXT,
+    kapso_id TEXT,
+    wa_name TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -22,29 +24,13 @@ const SCHEMA_SQL = `
     PRIMARY KEY (contact_id, tag_id)
   );
 
-  CREATE TABLE IF NOT EXISTS conversations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-    whatsapp_chat_id TEXT,
-    status TEXT NOT NULL DEFAULT 'open',
-    last_message_at TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-    content TEXT NOT NULL,
-    direction TEXT NOT NULL CHECK (direction IN ('in', 'out')),
-    status TEXT NOT NULL DEFAULT 'sent',
-    sent_at TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
   CREATE TABLE IF NOT EXISTS campaigns (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     message_template TEXT NOT NULL,
+    template_name TEXT,
+    template_language TEXT NOT NULL DEFAULT 'es',
+    template_variables TEXT NOT NULL DEFAULT '[]',
     status TEXT NOT NULL DEFAULT 'draft',
     total_contacts INTEGER NOT NULL DEFAULT 0,
     sent_count INTEGER NOT NULL DEFAULT 0,

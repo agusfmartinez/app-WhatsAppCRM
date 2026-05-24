@@ -4,12 +4,12 @@ const waListeners = new Map();
 const updaterListeners = new Map();
 
 contextBridge.exposeInMainWorld('api', {
-  // ── App info ──────────────────────────────────────────────────────────────
+  // ── App ───────────────────────────────────────────────────────────────────
   getAppInfo: () => ipcRenderer.invoke('app:info'),
   forceUpdate: () => ipcRenderer.invoke('app:forceUpdate'),
   subscribeUpdaterLogs: () => ipcRenderer.invoke('updater:subscribe'),
 
-  // ── WhatsApp events (push from main) ────────────────────────────────────
+  // ── Push events from main ─────────────────────────────────────────────────
   onWhatsAppEvent: (cb) => {
     const wrapped = (_e, data) => cb(data);
     const existing = waListeners.get(cb);
@@ -21,8 +21,6 @@ contextBridge.exposeInMainWorld('api', {
     const wrapped = waListeners.get(cb);
     if (wrapped) { ipcRenderer.removeListener('whatsapp:event', wrapped); waListeners.delete(cb); }
   },
-
-  // ── Updater logs (push from main) ────────────────────────────────────────
   onUpdaterLog: (cb) => {
     const wrapped = (_e, data) => cb(data);
     const existing = updaterListeners.get(cb);
@@ -35,7 +33,7 @@ contextBridge.exposeInMainWorld('api', {
     if (wrapped) { ipcRenderer.removeListener('updater:log', wrapped); updaterListeners.delete(cb); }
   },
 
-  // ── Contacts ──────────────────────────────────────────────────────────────
+  // ── CRM: Contacts (local DB) ──────────────────────────────────────────────
   contacts: {
     list: (filter) => ipcRenderer.invoke('crm:contacts:list', filter),
     get: (id) => ipcRenderer.invoke('crm:contacts:get', id),
@@ -45,7 +43,7 @@ contextBridge.exposeInMainWorld('api', {
     stats: () => ipcRenderer.invoke('crm:contacts:stats'),
   },
 
-  // ── Tags ─────────────────────────────────────────────────────────────────
+  // ── CRM: Tags ─────────────────────────────────────────────────────────────
   tags: {
     list: () => ipcRenderer.invoke('crm:tags:list'),
     create: (data) => ipcRenderer.invoke('crm:tags:create', data),
@@ -53,7 +51,7 @@ contextBridge.exposeInMainWorld('api', {
     delete: (id) => ipcRenderer.invoke('crm:tags:delete', id),
   },
 
-  // ── Campaigns ─────────────────────────────────────────────────────────────
+  // ── CRM: Campaigns ────────────────────────────────────────────────────────
   campaigns: {
     list: () => ipcRenderer.invoke('crm:campaigns:list'),
     get: (id) => ipcRenderer.invoke('crm:campaigns:get', id),
@@ -62,35 +60,55 @@ contextBridge.exposeInMainWorld('api', {
     delete: (id) => ipcRenderer.invoke('crm:campaigns:delete', id),
   },
 
-  // ── Conversations ─────────────────────────────────────────────────────────
-  conversations: {
-    list: () => ipcRenderer.invoke('crm:conversations:list'),
-    get: (id) => ipcRenderer.invoke('crm:conversations:get', id),
-  },
-
-  // ── Messages ──────────────────────────────────────────────────────────────
-  messages: {
-    list: (conversationId) => ipcRenderer.invoke('crm:messages:list', conversationId),
-    send: (conversationId, content) => ipcRenderer.invoke('crm:messages:send', conversationId, content),
-  },
-
-  // ── Settings ──────────────────────────────────────────────────────────────
+  // ── CRM: Settings ─────────────────────────────────────────────────────────
   settings: {
     get: (key) => ipcRenderer.invoke('crm:settings:get', key),
     set: (key, value) => ipcRenderer.invoke('crm:settings:set', key, value),
     getAll: () => ipcRenderer.invoke('crm:settings:get-all'),
   },
 
-  // ── WhatsApp control ──────────────────────────────────────────────────────
+  // ── CRM: Dashboard stats ──────────────────────────────────────────────────
+  stats: () => ipcRenderer.invoke('crm:stats'),
+
+  // ── CRM: Sync ─────────────────────────────────────────────────────────────
+  syncKapsoContacts: () => ipcRenderer.invoke('crm:sync-kapso-contacts'),
+
+  // ── WhatsApp: connection ──────────────────────────────────────────────────
   whatsapp: {
     getStatus: () => ipcRenderer.invoke('crm:whatsapp:status'),
     connect: (config) => ipcRenderer.invoke('crm:whatsapp:connect', config),
     disconnect: () => ipcRenderer.invoke('crm:whatsapp:disconnect'),
     listProviders: () => ipcRenderer.invoke('crm:whatsapp:providers'),
-  },
+    detectNumbers: (apiKey) => ipcRenderer.invoke('crm:whatsapp:detect-numbers', apiKey),
 
-  // ── Dashboard stats ───────────────────────────────────────────────────────
-  stats: () => ipcRenderer.invoke('crm:stats'),
+    // Messages
+    listMessages: (opts) => ipcRenderer.invoke('crm:whatsapp:list-messages', opts),
+    sendMessage: (to, body) => ipcRenderer.invoke('crm:whatsapp:send-message', to, body),
+
+    // Conversations
+    listConversations: (opts) => ipcRenderer.invoke('crm:whatsapp:list-conversations', opts),
+    getConversation: (id) => ipcRenderer.invoke('crm:whatsapp:get-conversation', id),
+
+    // Templates
+    getTemplates: () => ipcRenderer.invoke('crm:whatsapp:templates'),
+    createTemplate: (data) => ipcRenderer.invoke('crm:whatsapp:create-template', data),
+    deleteTemplate: (name) => ipcRenderer.invoke('crm:whatsapp:delete-template', name),
+
+    // WA Contacts
+    listWaContacts: (opts) => ipcRenderer.invoke('crm:whatsapp:wa-contacts', opts),
+
+    // Business Profile
+    getBusinessProfile: () => ipcRenderer.invoke('crm:whatsapp:business-profile'),
+    updateBusinessProfile: (data) => ipcRenderer.invoke('crm:whatsapp:update-business-profile', data),
+
+    // Phone Number
+    getPhoneNumberDetails: () => ipcRenderer.invoke('crm:whatsapp:phone-details'),
+
+    // Block Users
+    listBlockedUsers: () => ipcRenderer.invoke('crm:whatsapp:blocked-users'),
+    blockUser: (phone) => ipcRenderer.invoke('crm:whatsapp:block-user', phone),
+    unblockUser: (phone) => ipcRenderer.invoke('crm:whatsapp:unblock-user', phone),
+  },
 });
 
 contextBridge.exposeInMainWorld('updater', {
