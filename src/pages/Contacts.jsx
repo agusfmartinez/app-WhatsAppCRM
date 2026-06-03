@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const TAG_COLORS = ['#6b7280', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899'];
+const PAGE_SIZE = 50;
 
 function TagBadge({ tag }) {
   return (
@@ -150,19 +151,30 @@ export default function Contacts() {
   const [modal, setModal] = useState(null); // null | 'new' | contact obj
   const [deleteConfirm, setDeleteConfirm] = useState(null); // contact id pending delete
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     const [c, t] = await Promise.all([
-      window.api?.contacts?.list({ search, tagId: filterTag }) ?? [],
+      window.api?.contacts?.list({ search, tagId: filterTag, limit: PAGE_SIZE, offset: 0 }) ?? [],
       window.api?.tags?.list() ?? [],
     ]);
     setContacts(c || []);
     setTags(t || []);
+    setHasMore((c || []).length === PAGE_SIZE);
     setLoading(false);
   }, [search, filterTag]);
+
+  const loadMore = useCallback(async () => {
+    setLoadingMore(true);
+    const batch = await window.api?.contacts?.list({ search, tagId: filterTag, limit: PAGE_SIZE, offset: contacts.length }) ?? [];
+    setContacts(prev => [...prev, ...(batch || [])]);
+    setHasMore((batch || []).length === PAGE_SIZE);
+    setLoadingMore(false);
+  }, [search, filterTag, contacts.length]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -202,7 +214,7 @@ export default function Contacts() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-white">Contactos</h1>
-          <p className="text-sm text-gray-400 mt-1">{contacts.length} contactos</p>
+          <p className="text-sm text-gray-400 mt-1">{contacts.length}{hasMore ? '+' : ''} contactos</p>
         </div>
         <div className="flex items-center gap-2">
           {syncResult && syncResult.ok && (
@@ -343,6 +355,15 @@ export default function Contacts() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {!loading && hasMore && (
+        <div className="mt-4 text-center">
+          <button onClick={loadMore} disabled={loadingMore}
+            className="px-4 py-2 text-sm text-gray-300 border border-gray-700 rounded-lg hover:border-gray-600 disabled:opacity-40 transition-colors">
+            {loadingMore ? 'Cargando…' : 'Cargar más'}
+          </button>
         </div>
       )}
 

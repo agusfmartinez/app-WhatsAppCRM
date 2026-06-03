@@ -35,7 +35,7 @@ function runBatch(sql, params = []) {
 function initCrm(ipcMain, waManager) {
   // ─── Contacts ─────────────────────────────────────────────────────────────
 
-  ipcMain.handle('crm:contacts:list', (_e, { search = '', tagId = null } = {}) => {
+  ipcMain.handle('crm:contacts:list', (_e, { search = '', tagId = null, limit = null, offset = 0 } = {}) => {
     let sql = `
       SELECT c.id, c.name, c.phone, c.email, c.company, c.notes, c.kapso_id, c.wa_name, c.created_at, c.updated_at,
              GROUP_CONCAT(t.id || ':' || t.name || ':' || t.color) AS tags_raw
@@ -56,6 +56,12 @@ function initCrm(ipcMain, waManager) {
     }
     if (where.length) sql += ` WHERE ${where.join(' AND ')}`;
     sql += ` GROUP BY c.id ORDER BY c.name ASC`;
+    // Pagination is opt-in: callers that need all contacts (Campaigns target, Inbox
+    // enrichment) omit `limit`; the Contacts page passes limit/offset.
+    if (limit != null) {
+      sql += ` LIMIT ? OFFSET ?`;
+      params.push(limit, offset);
+    }
     const rows = all(sql, params).map(parseTags);
     return rows;
   });

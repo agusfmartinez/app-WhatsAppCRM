@@ -106,12 +106,16 @@ export default function Inbox() {
   const { state } = useLocation();
   const [conversations, setConversations] = useState([]);
   const [previews, setPreviews] = useState({}); // convId → { text, ts, lastInboundTs }
+  const [convsCursor, setConvsCursor] = useState(null);
+  const [loadingMoreConvs, setLoadingMoreConvs] = useState(false);
   const [lastRead, setLastRead] = useState(() => {
     try { return JSON.parse(localStorage.getItem(LAST_READ_KEY)) || {}; } catch { return {}; }
   });
   const [localContacts, setLocalContacts] = useState({}); // phone → contact
   const [active, setActive] = useState(null);
   const [messages, setMessages] = useState([]);
+  const [msgsCursor, setMsgsCursor] = useState(null); // cursor for older messages
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [loadingConvs, setLoadingConvs] = useState(true);
@@ -159,20 +163,55 @@ export default function Inbox() {
         return tb - ta;
       });
       setConversations(convs);
+      setConvsCursor(convRes.paging?.next ? convRes.paging?.cursors?.after : null);
     }
     setLoadingConvs(false);
   }, []);
+
+  // Load older conversations (next page). Previews stay as-is; older convs fall back
+  // to last_active_at for ordering and show no message preview.
+  const loadMoreConvs = useCallback(async () => {
+    if (!convsCursor) return;
+    setLoadingMoreConvs(true);
+    const res = await window.api?.whatsapp?.listConversations({ limit: 50, after: convsCursor });
+    if (res?.ok) {
+      setConversations(prev => {
+        const seen = new Set(prev.map(c => c.id));
+        const merged = [...prev, ...(res.data || []).filter(c => !seen.has(c.id))];
+        return merged;
+      });
+      setConvsCursor(res.paging?.next ? res.paging?.cursors?.after : null);
+    }
+    setLoadingMoreConvs(false);
+  }, [convsCursor]);
 
   const loadMessages = useCallback(async (conv) => {
     if (!conv) return;
     setLoadingMsgs(true);
     const res = await window.api?.whatsapp?.listMessages({ conversationId: conv.id, limit: 60 });
     if (res?.ok) {
-      // Messages come newest-first; reverse for chat display
+      // Messages come newest-first; reverse for chat display (oldest→newest)
       setMessages([...(res.data || [])].reverse());
+      setMsgsCursor(res.paging?.next ? res.paging?.cursors?.after : null);
     }
     setLoadingMsgs(false);
   }, []);
+
+  // Load older messages (older page) and prepend to history
+  const loadOlderMessages = useCallback(async () => {
+    if (!active || !msgsCursor) return;
+    setLoadingOlder(true);
+    const res = await window.api?.whatsapp?.listMessages({ conversationId: active.id, limit: 60, after: msgsCursor });
+    if (res?.ok) {
+      const older = [...(res.data || [])].reverse(); // oldest→newest
+      setMessages(prev => {
+        const seen = new Set(prev.map(m => m.id));
+        return [...older.filter(m => !seen.has(m.id)), ...prev];
+      });
+      setMsgsCursor(res.paging?.next ? res.paging?.cursors?.after : null);
+    }
+    setLoadingOlder(false);
+  }, [active, msgsCursor]);
 
   // Initial load + polling
   useEffect(() => {
@@ -212,9 +251,11 @@ export default function Inbox() {
     return () => clearInterval(t);
   }, [active, loadMessages]);
 
+  // Auto-scroll only when the newest message changes or conversation switches —
+  // not when prepending older messages.
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages[messages.length - 1]?.id, active?.id]);
 
   const send = async (e) => {
     e.preventDefault();
@@ -279,22 +320,32 @@ export default function Inbox() {
             <p className="text-xs text-gray-500 text-center py-8">Cargando...</p>
           ) : filtered.length === 0 ? (
             <p className="text-xs text-gray-500 text-center py-8">Sin conversaciones</p>
-          ) : filtered.map(conv => (
-            <ConversationItem
-              key={conv.id}
-              conv={conv}
-              preview={previews[conv.id]}
-              unread={(() => {
-                const inb = previews[conv.id]?.lastInboundTs;
-                if (!inb || active?.id === conv.id) return false;
-                const read = lastRead[conv.id];
-                return !read || new Date(inb).getTime() > new Date(read).getTime();
-              })()}
-              localContact={localContacts[normPhone(conv.phone_number)]}
-              active={active?.id === conv.id}
-              onClick={() => setActive(conv)}
-            />
-          ))}
+          ) : (
+            <>
+              {filtered.map(conv => (
+                <ConversationItem
+                  key={conv.id}
+                  conv={conv}
+                  preview={previews[conv.id]}
+                  unread={(() => {
+                    const inb = previews[conv.id]?.lastInboundTs;
+                    if (!inb || active?.id === conv.id) return false;
+                    const read = lastRead[conv.id];
+                    return !read || new Date(inb).getTime() > new Date(read).getTime();
+                  })()}
+                  localContact={localContacts[normPhone(conv.phone_number)]}
+                  active={active?.id === conv.id}
+                  onClick={() => setActive(conv)}
+                />
+              ))}
+              {convsCursor && !search && (
+                <button onClick={loadMoreConvs} disabled={loadingMoreConvs}
+                  className="w-full py-3 text-xs text-gray-400 hover:text-gray-200 disabled:opacity-40 transition-colors">
+                  {loadingMoreConvs ? 'Cargando…' : 'Cargar más conversaciones'}
+                </button>
+              )}
+            </>
+          )}
         </div>
       </div>
 
@@ -330,6 +381,14 @@ export default function Inbox() {
             {loadingMsgs && <p className="text-xs text-gray-500 text-center">Cargando mensajes...</p>}
             {!loadingMsgs && messages.length === 0 && (
               <p className="text-xs text-gray-500 text-center py-8">Sin mensajes</p>
+            )}
+            {!loadingMsgs && msgsCursor && (
+              <div className="flex justify-center pb-2">
+                <button onClick={loadOlderMessages} disabled={loadingOlder}
+                  className="text-xs text-gray-400 hover:text-gray-200 disabled:opacity-40 transition-colors">
+                  {loadingOlder ? 'Cargando…' : 'Cargar mensajes anteriores'}
+                </button>
+              </div>
             )}
             {messages.map((msg, i) => {
               const d = msgDate(msg);

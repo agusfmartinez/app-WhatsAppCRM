@@ -33,6 +33,15 @@ metadata:
 - WhatsApp provider modular (IWhatsAppProvider) → fácil switch de Kapso a otro
 - Templates requieren aprobación Meta (24-48hs) → el cliente debe esperar, la app ayuda en el proceso
 
+## Paginación (contrato importante)
+
+- `crm:contacts:list` pagina con `limit`/`offset` **opt-in**: sin `limit` devuelve TODOS. **No poner limit por defecto** — Campañas (selector de segmentación) e Inbox (mapa de enriquecimiento phone→contacto) dependen de recibir todos los contactos.
+- Página Contactos: paginada (PAGE_SIZE=50, botón "Cargar más").
+- Inbox: convs y mensajes paginados con cursor de Kapso (`after` cuando `paging.next`). "Cargar más conversaciones" / "Cargar mensajes anteriores".
+- Templates: paginado con cursor Meta (`after`).
+- `crm:campaigns:get` carga TODOS los `campaign_contacts` — todavía no cableado en UI; paginar cuando se construya la vista de detalle.
+- Pendiente mejora: picker de contactos en Campañas con búsqueda server-side (hoy carga todos).
+
 ## Pendientes de decisión
 
 - Nombre definitivo de la app (bloquea Supabase project, GitHub, installer)
