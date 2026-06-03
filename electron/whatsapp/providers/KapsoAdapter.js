@@ -66,22 +66,34 @@ class KapsoAdapter extends IWhatsAppProvider {
     });
   }
 
-  /** List messages for a phone number, optionally filtered by conversation */
-  async listMessages({ conversationId, direction, limit = 50, after, before } = {}) {
-    if (this._status !== 'connected') return { ok: false, error: 'Not connected' };
-    const params = new URLSearchParams({ fields: 'kapso()', limit: String(limit) });
+  /**
+   * List messages via Platform v1 — always includes kapso.direction (inbound/outbound).
+   * GET /platform/v1/whatsapp/messages?phone_number_id=X&conversation_id=UUID
+   */
+  async listMessages({ conversationId, limit = 60, after, before } = {}) {
+    if (!this._apiKey || !this._phoneNumberId) return { ok: false, error: 'Not connected' };
+    const params = new URLSearchParams({ phone_number_id: this._phoneNumberId, limit: String(limit) });
     if (conversationId) params.set('conversation_id', conversationId);
-    if (direction) params.set('direction', direction);
     if (after) params.set('after', after);
     if (before) params.set('before', before);
-    return this._get(`/${this._phoneNumberId}/messages?${params}`);
+    try {
+      const res = await fetch(`${KAPSO_PLATFORM}/whatsapp/messages?${params}`, {
+        headers: { 'X-API-Key': this._apiKey },
+      });
+      if (!res.ok) { const t = await res.text().catch(() => ''); return { ok: false, error: `Kapso ${res.status}: ${t}` }; }
+      const data = await res.json().catch(() => ({}));
+      return { ok: true, data: data?.data ?? [], paging: data?.paging };
+    } catch (err) { return { ok: false, error: err.message }; }
   }
 
   // ── Conversations ─────────────────────────────────────────────────────────
 
-  /** List conversations (most recent first) */
-  async listConversations({ limit = 30, after, phone } = {}) {
-    if (this._status !== 'connected') return { ok: false, error: 'Not connected' };
+  /**
+   * List conversations via meta proxy with kapso enrichment.
+   * GET /meta/whatsapp/v24.0/{phone_number_id}/conversations?fields=kapso()
+   */
+  async listConversations({ limit = 50, after, phone } = {}) {
+    if (!this._apiKey || !this._phoneNumberId) return { ok: false, error: 'Not connected' };
     const params = new URLSearchParams({ fields: 'kapso()', limit: String(limit) });
     if (after) params.set('after', after);
     if (phone) params.set('phone_number', phone);
@@ -90,7 +102,7 @@ class KapsoAdapter extends IWhatsAppProvider {
 
   /** Get single conversation details */
   async getConversation(conversationId) {
-    if (this._status !== 'connected') return { ok: false, error: 'Not connected' };
+    if (!this._apiKey) return { ok: false, error: 'Not connected' };
     return this._get(`/${this._phoneNumberId}/conversations/${conversationId}?fields=kapso()`);
   }
 

@@ -57,7 +57,6 @@ function initCrm(ipcMain, waManager) {
     if (where.length) sql += ` WHERE ${where.join(' AND ')}`;
     sql += ` GROUP BY c.id ORDER BY c.name ASC`;
     const rows = all(sql, params).map(parseTags);
-    console.log('[crm:contacts:list] rows:', JSON.stringify(rows.map(r => ({ id: r.id, name: r.name, phone: r.phone, kapso_id: r.kapso_id, wa_name: r.wa_name }))));
     return rows;
   });
 

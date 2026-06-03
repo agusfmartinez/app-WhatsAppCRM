@@ -20,8 +20,8 @@ metadata:
 - ✅ Send template message (campaigns)
 - ✅ List/create templates
 - ✅ Auto-detect phone numbers (List phone numbers)
-- 🔜 List messages (inbox polling)
-- 🔜 List conversations (inbox)
+- ✅ List messages (inbox polling) — ver [[kapso-inbox-quirks]]
+- ✅ List conversations (inbox) — ver [[kapso-inbox-quirks]]
 - 🔜 Delete template
 - 🔜 Get business profile
 - 🔜 Media upload/download (fase 3)

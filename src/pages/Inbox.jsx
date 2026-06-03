@@ -2,6 +2,40 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 
 const POLL_INTERVAL = 30_000;
+const WINDOW_MS = 24 * 60 * 60 * 1000; // WhatsApp customer-service window
+const LAST_READ_KEY = 'inbox:lastRead';
+
+/** True if the 24h free-reply window is open (last inbound within 24h) */
+function isWindowOpen(lastInboundTs) {
+  if (!lastInboundTs) return false;
+  return Date.now() - new Date(lastInboundTs).getTime() < WINDOW_MS;
+}
+
+/** Date object from a message's unix-seconds timestamp */
+function msgDate(msg) {
+  return msg?.timestamp ? new Date(Number(msg.timestamp) * 1000) : null;
+}
+
+/** WhatsApp-style day label: Hoy / Ayer / "12 de mayo" / "12 de mayo de 2025" */
+function dayLabel(d) {
+  const today = new Date();
+  const yest = new Date(); yest.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return 'Hoy';
+  if (d.toDateString() === yest.toDateString()) return 'Ayer';
+  return d.toLocaleDateString('es-AR', {
+    day: 'numeric',
+    month: 'long',
+    ...(d.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}),
+  });
+}
+
+function DateDivider({ label }) {
+  return (
+    <div className="flex justify-center my-2">
+      <span className="text-[10px] text-gray-400 bg-gray-800/80 rounded-full px-3 py-1">{label}</span>
+    </div>
+  );
+}
 
 /** Normalize phone: digits only, strip leading zeros for display */
 function normPhone(phone) {
@@ -16,10 +50,10 @@ function Avatar({ name, size = 9 }) {
   );
 }
 
-function ConversationItem({ conv, localContact, active, onClick }) {
-  const displayName = localContact?.name || conv.kapso?.contact_name || conv.phone_number || '—';
-  const lastText = conv.kapso?.last_message_text || '';
-  const lastTs = conv.kapso?.last_message_timestamp || conv.last_active_at;
+function ConversationItem({ conv, localContact, preview, unread, active, onClick }) {
+  const displayName = localContact?.name || conv.contact_name || conv.phone_number || '—';
+  const lastText = preview?.text || '';
+  const lastTs = preview?.ts || conv.last_active_at;
   const time = lastTs ? new Date(lastTs).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '';
 
   return (
@@ -31,8 +65,11 @@ function ConversationItem({ conv, localContact, active, onClick }) {
         <Avatar name={displayName} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-100 truncate">{displayName}</span>
-            <span className="text-[10px] text-gray-500 shrink-0 ml-2">{time}</span>
+            <span className={`text-sm truncate ${unread ? 'font-semibold text-white' : 'font-medium text-gray-100'}`}>{displayName}</span>
+            <div className="flex items-center gap-1.5 shrink-0 ml-2">
+              <span className={`text-[10px] ${unread ? 'text-green-400' : 'text-gray-500'}`}>{time}</span>
+              {unread && <span className="h-2 w-2 rounded-full bg-green-500" />}
+            </div>
           </div>
           {localContact?.tags?.length > 0 && (
             <div className="flex gap-1 mt-0.5">
@@ -68,6 +105,10 @@ function Message({ msg }) {
 export default function Inbox() {
   const { state } = useLocation();
   const [conversations, setConversations] = useState([]);
+  const [previews, setPreviews] = useState({}); // convId → { text, ts, lastInboundTs }
+  const [lastRead, setLastRead] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(LAST_READ_KEY)) || {}; } catch { return {}; }
+  });
   const [localContacts, setLocalContacts] = useState({}); // phone → contact
   const [active, setActive] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -90,8 +131,35 @@ export default function Inbox() {
   }, []);
 
   const loadConversations = useCallback(async () => {
-    const res = await window.api?.whatsapp?.listConversations({ limit: 50 });
-    if (res?.ok) setConversations(res.data || []);
+    const [convRes, msgRes] = await Promise.all([
+      window.api?.whatsapp?.listConversations({ limit: 50 }),
+      window.api?.whatsapp?.listMessages({ limit: 100 }), // recent across all convs, newest-first
+    ]);
+
+    // Build convId → preview from recent messages (newest-first).
+    // First seen per conv = last message (any dir); first inbound seen = lastInboundTs.
+    const map = {};
+    for (const m of (msgRes?.ok && msgRes.data) || []) {
+      const cid = m.kapso?.whatsapp_conversation_id;
+      if (!cid) continue;
+      const ts = m.timestamp ? new Date(Number(m.timestamp) * 1000).toISOString() : null;
+      if (!map[cid]) {
+        map[cid] = { text: m.text?.body || m.kapso?.content || '', ts, lastInboundTs: null };
+      }
+      if (!map[cid].lastInboundTs && m.kapso?.direction === 'inbound') {
+        map[cid].lastInboundTs = ts;
+      }
+    }
+    setPreviews(map);
+
+    if (convRes?.ok) {
+      const convs = (convRes.data || []).slice().sort((a, b) => {
+        const ta = new Date(map[a.id]?.ts || a.last_active_at || 0).getTime();
+        const tb = new Date(map[b.id]?.ts || b.last_active_at || 0).getTime();
+        return tb - ta;
+      });
+      setConversations(convs);
+    }
     setLoadingConvs(false);
   }, []);
 
@@ -124,10 +192,17 @@ export default function Inbox() {
     }
   }, [conversations, state?.filterPhone]);
 
-  // Load messages when conversation changes
+  // Load messages when conversation changes + mark as read
   useEffect(() => {
     setMessages([]);
     loadMessages(active);
+    if (active) {
+      setLastRead(prev => {
+        const next = { ...prev, [active.id]: new Date().toISOString() };
+        try { localStorage.setItem(LAST_READ_KEY, JSON.stringify(next)); } catch {}
+        return next;
+      });
+    }
   }, [active, loadMessages]);
 
   // Poll messages for active conversation
@@ -143,7 +218,7 @@ export default function Inbox() {
 
   const send = async (e) => {
     e.preventDefault();
-    if (!text.trim() || !active) return;
+    if (!text.trim() || !active || !windowOpen) return;
     setSending(true);
     const content = text.trim();
     const phone = active.phone_number;
@@ -158,15 +233,31 @@ export default function Inbox() {
         text: { body: content },
         kapso: { direction: 'outbound' },
       }]);
+      // Bump preview + reorder list
+      setPreviews(prev => ({ ...prev, [active.id]: { text: content, ts: new Date().toISOString() } }));
+      setConversations(prev => [active, ...prev.filter(c => c.id !== active.id)]);
     }
     setSending(false);
   };
+
+  // 24h window for active conv: derive last inbound from loaded messages (authoritative),
+  // fall back to global preview map.
+  const activeLastInbound = (() => {
+    if (!active) return null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].kapso?.direction === 'inbound' && messages[i].timestamp) {
+        return new Date(Number(messages[i].timestamp) * 1000).toISOString();
+      }
+    }
+    return previews[active.id]?.lastInboundTs || null;
+  })();
+  const windowOpen = active ? isWindowOpen(activeLastInbound) : false;
 
   const filtered = conversations.filter(c => {
     if (!search) return true;
     const phone = normPhone(c.phone_number);
     const local = localContacts[phone];
-    const name = local?.name || c.kapso?.contact_name || '';
+    const name = local?.name || c.contact_name || '';
     return name.toLowerCase().includes(search.toLowerCase()) || phone.includes(search);
   });
 
@@ -192,6 +283,13 @@ export default function Inbox() {
             <ConversationItem
               key={conv.id}
               conv={conv}
+              preview={previews[conv.id]}
+              unread={(() => {
+                const inb = previews[conv.id]?.lastInboundTs;
+                if (!inb || active?.id === conv.id) return false;
+                const read = lastRead[conv.id];
+                return !read || new Date(inb).getTime() > new Date(read).getTime();
+              })()}
               localContact={localContacts[normPhone(conv.phone_number)]}
               active={active?.id === conv.id}
               onClick={() => setActive(conv)}
@@ -207,7 +305,7 @@ export default function Inbox() {
           <div className="px-5 py-3.5 border-b border-gray-800 flex items-center gap-3">
             {(() => {
               const local = localContacts[normPhone(active.phone_number)];
-              const name = local?.name || active.kapso?.contact_name || active.phone_number;
+              const name = local?.name || active.contact_name || active.phone_number;
               return (
                 <>
                   <Avatar name={name} size={8} />
@@ -233,7 +331,24 @@ export default function Inbox() {
             {!loadingMsgs && messages.length === 0 && (
               <p className="text-xs text-gray-500 text-center py-8">Sin mensajes</p>
             )}
-            {messages.map((msg, i) => <Message key={msg.id ?? i} msg={msg} />)}
+            {messages.map((msg, i) => {
+              const d = msgDate(msg);
+              const prevD = i > 0 ? msgDate(messages[i - 1]) : null;
+              const showDivider = d && (!prevD || d.toDateString() !== prevD.toDateString());
+              return (
+                <div key={msg.id ?? i}>
+                  {showDivider && <DateDivider label={dayLabel(d)} />}
+                  <Message msg={msg} />
+                </div>
+              );
+            })}
+            {!loadingMsgs && active && !windowOpen && (
+              <div className="flex justify-center pt-2">
+                <p className="max-w-sm text-center text-[11px] text-amber-400/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                  Ventana de 24hs cerrada — no se pueden enviar mensajes libres. Usá una plantilla aprobada desde Campañas para reabrir la conversación.
+                </p>
+              </div>
+            )}
             <div ref={bottomRef} />
           </div>
 
@@ -242,12 +357,13 @@ export default function Inbox() {
             <input
               value={text}
               onChange={e => setText(e.target.value)}
-              placeholder="Escribí un mensaje... (solo en ventana de 24hs)"
-              className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+              disabled={!windowOpen}
+              placeholder={windowOpen ? 'Escribí un mensaje...' : 'Ventana de 24hs cerrada'}
+              className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
             />
             <button
               type="submit"
-              disabled={!text.trim() || sending}
+              disabled={!text.trim() || sending || !windowOpen}
               className="h-10 w-10 rounded-xl bg-green-600 hover:bg-green-500 disabled:opacity-40 flex items-center justify-center transition-colors shrink-0"
             >
               <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
