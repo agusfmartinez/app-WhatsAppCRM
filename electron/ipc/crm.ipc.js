@@ -56,7 +56,9 @@ function initCrm(ipcMain, waManager) {
     }
     if (where.length) sql += ` WHERE ${where.join(' AND ')}`;
     sql += ` GROUP BY c.id ORDER BY c.name ASC`;
-    return all(sql, params).map(parseTags);
+    const rows = all(sql, params).map(parseTags);
+    console.log('[crm:contacts:list] rows:', JSON.stringify(rows.map(r => ({ id: r.id, name: r.name, phone: r.phone, kapso_id: r.kapso_id, wa_name: r.wa_name }))));
+    return rows;
   });
 
   ipcMain.handle('crm:contacts:get', (_e, id) => {
@@ -73,7 +75,8 @@ function initCrm(ipcMain, waManager) {
   });
 
   ipcMain.handle('crm:contacts:create', (_e, data) => {
-    const { name, phone, email = null, company = null, notes = null, tagIds = [] } = data;
+    const { name, email = null, company = null, notes = null, tagIds = [] } = data;
+    const phone = normalizePhone(data.phone);
     const { lastInsertRowid: id } = run(
       `INSERT INTO contacts (name, phone, email, company, notes) VALUES (?, ?, ?, ?, ?)`,
       [name, phone, email, company, notes]
@@ -295,6 +298,7 @@ function initCrm(ipcMain, waManager) {
     let created = 0, updated = 0, unchanged = 0;
 
     for (const kc of kapsoContacts) {
+      if (kc.sandbox) continue; // skip sandbox/test contacts
       const phone = String(kc.wa_id || '').replace(/[^0-9]/g, '');
       if (!phone) continue;
 
@@ -311,29 +315,63 @@ function initCrm(ipcMain, waManager) {
 
       const normalize = `REPLACE(REPLACE(REPLACE(phone, '+', ''), '-', ''), ' ', '')`;
       const placeholders = phoneVariants.map(() => '?').join(', ');
-      const existing = first(
-        `SELECT * FROM contacts WHERE ${normalize} IN (${placeholders})`,
+
+      // Find ALL local contacts matching any phone variant
+      const matches = all(
+        `SELECT * FROM contacts WHERE ${normalize} IN (${placeholders}) ORDER BY kapso_id IS NULL ASC, id ASC`,
         phoneVariants
       );
+      // ORDER BY: contacts with kapso_id come first (preferred canonical), then oldest by id
 
-      if (existing) {
-        // Update kapso_id and wa_name if changed
-        if (existing.kapso_id !== kapsoId || existing.wa_name !== waName) {
+      if (matches.length === 0) {
+        // No local match — create from Kapso data only if not already owned
+        const alreadyOwned = first(`SELECT id FROM contacts WHERE kapso_id = ?`, [kapsoId]);
+        if (!alreadyOwned) {
+          run(
+            `INSERT INTO contacts (name, phone, kapso_id, wa_name) VALUES (?, ?, ?, ?)`,
+            [waName || phone, phone, kapsoId, waName]
+          );
+          created++;
+        }
+      } else {
+        // canonical = first result (already has kapso_id, or oldest)
+        const canonical = matches[0];
+        const duplicates = matches.slice(1);
+
+        // Merge local data from duplicates into canonical (fill empty fields)
+        for (const dup of duplicates) {
+          // Transfer non-empty local fields if canonical is empty
+          const updates = {};
+          if (!canonical.email && dup.email) updates.email = dup.email;
+          if (!canonical.company && dup.company) updates.company = dup.company;
+          if (!canonical.notes && dup.notes) updates.notes = dup.notes;
+          if (Object.keys(updates).length) {
+            const sets = Object.keys(updates).map(k => `${k}=?`).join(', ');
+            runBatch(`UPDATE contacts SET ${sets} WHERE id=?`, [...Object.values(updates), canonical.id]);
+          }
+          // Transfer tags
+          const dupTags = all(`SELECT tag_id FROM contact_tags WHERE contact_id=?`, [dup.id]);
+          for (const { tag_id } of dupTags) {
+            try { runBatch(`INSERT OR IGNORE INTO contact_tags (contact_id, tag_id) VALUES (?,?)`, [canonical.id, tag_id]); } catch {}
+          }
+          // Delete duplicate
+          runBatch(`DELETE FROM contacts WHERE id=?`, [dup.id]);
+        }
+
+        // Update canonical with kapso_id and wa_name
+        if (canonical.kapso_id !== kapsoId || canonical.wa_name !== waName) {
           run(
             `UPDATE contacts SET kapso_id=?, wa_name=?, updated_at=datetime('now') WHERE id=?`,
-            [kapsoId, waName, existing.id]
+            [kapsoId, waName, canonical.id]
           );
           updated++;
         } else {
           unchanged++;
         }
-      } else {
-        // Create new contact from Kapso data
-        run(
-          `INSERT INTO contacts (name, phone, kapso_id, wa_name) VALUES (?, ?, ?, ?)`,
-          [waName || phone, phone, kapsoId, waName]
-        );
-        created++;
+
+        if (duplicates.length) {
+          saveDb();
+        }
       }
     }
 
@@ -344,9 +382,10 @@ function initCrm(ipcMain, waManager) {
 
   ipcMain.handle('crm:stats', () => ({
     contacts: first(`SELECT COUNT(*) AS n FROM contacts`)?.n ?? 0,
-    campaigns: first(`SELECT COUNT(*) AS n FROM campaigns`)?.n ?? 0,
-    messagesSent: first(`SELECT COUNT(*) AS n FROM messages WHERE direction='out'`)?.n ?? 0,
-    messagesIn: first(`SELECT COUNT(*) AS n FROM messages WHERE direction='in'`)?.n ?? 0,
+    campaigns: first(`SELECT COUNT(*) AS n FROM campaigns WHERE status='sent'`)?.n ?? 0,
+    // messages now come from Kapso API, not local DB
+    messagesSent: null,
+    messagesIn: null,
   }));
 }
 
@@ -365,6 +404,16 @@ function parseTags(row) {
 
 function tryParseJson(val) {
   try { return JSON.parse(val); } catch { return val; }
+}
+
+/**
+ * Normalize phone to Kapso format: digits only, strip Argentine mobile "9"
+ * 5491134940534 → 541134940534 (Kapso wa_id format = country + area + number, no 9)
+ */
+function normalizePhone(phone) {
+  let p = String(phone || '').replace(/[^0-9]/g, '');
+  if (p.startsWith('549') && p.length === 13) p = '54' + p.slice(3);
+  return p;
 }
 
 module.exports = { initCrm };

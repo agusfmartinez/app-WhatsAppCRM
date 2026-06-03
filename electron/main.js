@@ -240,6 +240,41 @@ ipcMain.handle('app:info', () => {
 
 ipcMain.handle('app:forceUpdate', () => { return { ok: true }; });
 
+// ─── Auto-connect WhatsApp from saved settings ────────────────────────────────
+
+function tryAutoConnect(waManager, logger) {
+  try {
+    const { getDb } = require('./db/database');
+    const db = getDb();
+
+    const getSetting = (key) => {
+      const stmt = db.prepare('SELECT value FROM settings WHERE key=?');
+      stmt.bind([key]);
+      let val = null;
+      if (stmt.step()) val = stmt.getAsObject().value;
+      stmt.free();
+      if (!val) return null;
+      try { return JSON.parse(val); } catch { return val; }
+    };
+
+    const providerName = getSetting('wa_provider') || 'kapso';
+    const apiKey = getSetting('wa_api_key');
+    const phoneNumberId = getSetting('wa_api_url');           // stored as wa_api_url
+    const businessAccountId = getSetting('wa_business_account_id');
+
+    if (!apiKey || !phoneNumberId) {
+      logger?.info('Auto-connect: no credentials saved, skipping');
+      return;
+    }
+
+    waManager.connect({ providerName, config: { apiKey, phoneNumberId, businessAccountId } })
+      .then(res => logger?.info(`Auto-connect ${providerName}: ${res.ok ? 'connected' : res.error}`))
+      .catch(err => logger?.error(`Auto-connect error: ${err.message}`));
+  } catch (err) {
+    logger?.error(`Auto-connect setup failed: ${err.message}`);
+  }
+}
+
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
@@ -268,6 +303,9 @@ app.whenReady().then(async () => {
 
   initCrm(ipcMain, waManager);
   logIpc('info', 'CRM IPC registered');
+
+  // Auto-connect WhatsApp using saved settings
+  tryAutoConnect(waManager, appLogger);
 
   createSplash();
   createWindow();

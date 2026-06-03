@@ -159,9 +159,17 @@ class KapsoAdapter extends IWhatsAppProvider {
 
   // ── Phone Number ──────────────────────────────────────────────────────────
 
+  /** GET /platform/v1/whatsapp/phone_numbers/{id} — richer data than meta proxy */
   async getPhoneNumberDetails() {
-    if (this._status !== 'connected') return { ok: false, error: 'Not connected' };
-    return this._get(`/${this._phoneNumberId}`);
+    if (!this._apiKey || !this._phoneNumberId) return { ok: false, error: 'Not connected' };
+    try {
+      const res = await fetch(`${KAPSO_PLATFORM}/whatsapp/phone_numbers/${this._phoneNumberId}`, {
+        headers: { 'X-API-Key': this._apiKey },
+      });
+      if (!res.ok) { const t = await res.text().catch(() => ''); return { ok: false, error: `Kapso ${res.status}: ${t}` }; }
+      const data = await res.json().catch(() => ({}));
+      return { ok: true, ...data };
+    } catch (err) { return { ok: false, error: err.message }; }
   }
 
   // ── Block Users ───────────────────────────────────────────────────────────
@@ -203,11 +211,15 @@ class KapsoAdapter extends IWhatsAppProvider {
 
   // ── Static helpers ────────────────────────────────────────────────────────
 
-  /** Fetch all phone numbers in the project using only the API key */
+  /**
+   * Fetch production phone numbers using only the API key.
+   * Filters out sandbox numbers (kind === 'sandbox').
+   * Returns: phone_number_id, business_account_id, display_phone_number, verified_name, status, kind
+   */
   static async fetchPhoneNumbers(apiKey) {
     if (!apiKey) return { ok: false, error: 'API Key requerida' };
     try {
-      const res = await fetch(`${KAPSO_PLATFORM}/whatsapp/phone_numbers`, {
+      const res = await fetch(`${KAPSO_PLATFORM}/whatsapp/phone_numbers?per_page=50`, {
         headers: { 'X-API-Key': apiKey },
       });
       if (!res.ok) {
@@ -215,7 +227,10 @@ class KapsoAdapter extends IWhatsAppProvider {
         return { ok: false, error: `Kapso ${res.status}: ${txt}` };
       }
       const data = await res.json().catch(() => ({}));
-      return { ok: true, phoneNumbers: data?.data ?? [] };
+      const all = data?.data ?? [];
+      // Only production numbers — skip sandbox
+      const production = all.filter(n => n.kind !== 'sandbox');
+      return { ok: true, phoneNumbers: production };
     } catch (err) {
       return { ok: false, error: err.message };
     }
