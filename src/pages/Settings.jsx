@@ -175,7 +175,7 @@ export default function Settings() {
                     if (nums.length === 1) {
                       setApiUrl(nums[0].phone_number_id);
                       setBusinessAccountId(nums[0].business_account_id);
-                      showMsg(`Detectado: ${nums[0].display_phone_number} (${nums[0].verified_name})`);
+                      showMsg(`Detectado: ${nums[0].display_phone_number || nums[0].phone_number_id} · ${nums[0].verified_name || ''} · ${nums[0].status || ''}`);
                     } else if (nums.length === 0) {
                       showMsg('Sin números en este proyecto', 'error');
                     }
@@ -202,8 +202,11 @@ export default function Settings() {
                     }}
                     className="w-full text-left px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-gray-100 transition-colors"
                   >
-                    <span className="font-medium">{n.display_phone_number}</span>
-                    <span className="text-gray-400 ml-2 text-xs">{n.verified_name}</span>
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">{n.display_phone_number || n.phone_number_id}</span>
+                      {n.status && <span className={`text-[11px] font-medium ${n.status === 'CONNECTED' ? 'text-green-400' : 'text-yellow-400'}`}>{n.status}</span>}
+                    </div>
+                    <div className="text-gray-400 text-xs">{n.verified_name} · {n.kind}</div>
                   </button>
                 ))}
               </div>

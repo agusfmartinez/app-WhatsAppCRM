@@ -5,7 +5,7 @@
 | Fase | Estado |
 |---|---|
 | Fase 1 — Fundación | ✅ Completa |
-| Fase 2 — Conexión WhatsApp | ⏳ Siguiente |
+| Fase 2 — Conexión WhatsApp (Kapso) | 🔄 En progreso |
 | Fase 3 — CRM completo | 🔜 Pendiente |
 | Fase 4 — Auth + Licencias | 🔜 Pendiente |
 | Fase 5 — Build + Distribución | 🔜 Pendiente |
@@ -14,87 +14,63 @@
 
 ## Fase 1 — Fundación ✅
 
-**Qué se hizo:**
-- Electron shell: ventana, seguridad (contextIsolation, sandbox), splash screen
-- React UI: sidebar dark SaaS + 6 páginas (Dashboard, Contactos, Campañas, Inbox, Reportes, Configuración)
+- Electron shell + seguridad (contextIsolation, sandbox)
+- React UI: sidebar dark SaaS + 7 páginas (Dashboard, Contactos, Campañas, Inbox, Reportes, Templates, Configuración)
 - SQLite local via sql.js (WASM, sin compilación nativa)
-- Esquema DB: contacts, tags, conversations, messages, campaigns, settings
-- Capa IPC completa: CRUD contactos, campañas, mensajes, settings
+- Esquema DB: contacts, tags, campaign_contacts, campaigns, settings
 - WhatsApp provider interface modular (`IWhatsAppProvider`)
 - Auto-update via electron-updater (GitHub Releases)
 - Auth bypass para desarrollo (`VITE_DEV_BYPASS_AUTH`)
-- Branding: WA CRM Desktop, dark theme, limpieza total de refs CAI
+- Branding: WA CRM Desktop, dark theme
 
-**Deuda técnica conocida:**
-- `assets/icon.ico` sigue siendo el ícono CAI → reemplazar con herramienta externa
-- GitHub publish config apunta al repo anterior → actualizar cuando se cree el nuevo
+**Deuda técnica:**
+- `assets/icon.ico` → ícono CAI, reemplazar
+- GitHub publish config → actualizar repo cuando se defina nombre final
 
 ---
 
-## Fase 2 — Conexión WhatsApp ⏳ (SIGUIENTE)
+## Fase 2 — Conexión WhatsApp (Kapso) 🔄
 
-**Objetivo:** Poder enviar y recibir mensajes reales de WhatsApp desde la app.
+**Provider elegido:** Kapso (REST API oficial, cuenta propia por cliente)
 
-**Decisión crítica: provider a implementar**
+**Completado:**
+- ✅ KapsoAdapter: connect, disconnect, sendMessage, sendTemplate
+- ✅ KapsoAdapter: listConversations, listMessages, deleteTemplate, getTemplates, createTemplate
+- ✅ KapsoAdapter: getPhoneNumberDetails (Platform v1), fetchPhoneNumbers (static)
+- ✅ KapsoAdapter: listWaContacts, getBusinessProfile, updateBusinessProfile
+- ✅ Auto-connect al startup desde settings guardados
+- ✅ Settings: "Detectar" → auto-fill phone_number_id + business_account_id
+- ✅ Sync contactos Kapso → DB local (con merge de variantes argentinas 549/54)
+- ✅ Templates: listar, crear, eliminar desde la app
+- ✅ Campañas: envío masivo de templates con delay configurable
 
-| Provider | Pros | Contras |
-|---|---|---|
-| **WAHA** (recomendado para dev) | Docker, REST API simple, gratis, sin cuenta WhatsApp Business | Requiere Docker corriendo en la PC del cliente |
-| **Kapso** | API oficial, más estable | Pago, requiere cuenta WhatsApp Business |
-| **Baileys** | 100% local, sin Docker | No oficial, puede quebrarse con updates de WA |
+**Pendiente:**
+- 🔜 Inbox: polling de conversaciones y mensajes reales desde Kapso Platform v1
+- 🔜 Inbox: envío de mensajes manuales desde conversación activa
+- 🔜 Onboarding wizard: guía para que el cliente configure Kapso (3 pasos)
 
-**Tareas Fase 2:**
-
-1. **Implementar WahaAdapter** (`electron/whatsapp/providers/WahaAdapter.js`)
-   - `connect()` → GET /api/sessions → POST /api/sessions/start
-   - `sendMessage()` → POST /api/sendText
-   - Webhook: recibir mensajes entrantes via HTTP endpoint local
-   - Emitir eventos: `status`, `qr`, `message`
-
-2. **HTTP server local** para webhook (`electron/whatsapp/webhook.js`)
-   - Express o http nativo, puerto configurable (default 3001)
-   - Endpoint POST `/webhook` → procesa mensajes entrantes → guarda en DB → emite `whatsapp:event` al renderer
-
-3. **QR code en Settings**
-   - Cuando status = `qr`, mostrar el QR en la página Settings
-   - Usar librería `qrcode` para renderizar
-
-4. **Conversaciones automáticas**
-   - Mensaje entrante → buscar contacto por phone → crear/actualizar conversation → guardar message
-   - Inbox muestra updates en tiempo real via `onWhatsAppEvent`
-
-5. **Settings: guardar config y conectar**
-   - Al guardar Settings, ejecutar `window.api.whatsapp.connect({ providerName, config })`
-   - Persistir config en DB settings table
-
-**Dependencias nuevas:**
+**Arquitectura de datos:**
 ```
-npm install qrcode express
+Kapso (fuente de verdad) ←→ polling cada 30s ←→ Inbox UI
+Local DB (fuente de verdad) ←→ CRUD directo  ←→ Contactos, Campañas
 ```
 
-**Diagrama Fase 2:**
-```
-WhatsApp (red) ←→ WAHA (Docker) ←→ WahaAdapter ←→ WhatsAppManager
-                                                          ↓
-                                                  webhook HTTP server
-                                                          ↓
-                                                    DB (messages)
-                                                          ↓
-                                             IPC → renderer (Inbox live)
-```
+**Modelo de negocio confirmado:**
+- Cada cliente tiene su propia cuenta Kapso (free tier)
+- Cliente hace 3 pasos: crear cuenta → conectar número WA → copiar API key
+- CRM auto-detecta phone_number_id + business_account_id
+- Cliente nunca vuelve a Kapso
 
 ---
 
 ## Fase 3 — CRM Completo
 
-1. **Tags CRUD** desde UI (página Settings o panel en Contactos)
-2. **Import CSV** — parsear CSV → validar → batch insert contactos
-3. **Export CSV** — exportar tabla contacts a archivo
-4. **Campaign delay + batch**
-   - Leer `campaign_delay` y `campaign_batch` de settings
-   - Enviar en lotes con delay entre mensajes (actualmente envía todo de golpe)
-5. **Progress en tiempo real** — campaign send pushea progreso al renderer via IPC push
-6. **Búsqueda en Inbox** — filtrar conversaciones por nombre/número
+1. **Tags CRUD** — gestión de etiquetas desde UI (página Settings o panel Contactos)
+2. **Import CSV** — parsear CSV → normalizar teléfonos → batch insert contactos
+3. **Export CSV** — exportar tabla contacts
+4. **Campañas: progreso en tiempo real** — push de estado por contacto durante envío
+5. **Campañas: variables por contacto** — mapear `{{1}}` a campo del contacto (nombre, empresa, etc.)
+6. **Inbox en tiempo real** — polling activo, notificación de mensajes nuevos
 
 ---
 
@@ -104,34 +80,34 @@ WhatsApp (red) ←→ WAHA (Docker) ←→ WahaAdapter ←→ WhatsAppManager
 2. **Tablas requeridas:**
    - `user_sessions` — control sesión única
    - `whitelist` — usuarios habilitados
-   - `licenses` — estado activo/inactivo por usuario
-   - `app_config` — versión mínima, canal de updates, feature flags
-3. **Poner `VITE_DEV_BYPASS_AUTH=false`** en producción
-4. **Backend de sesión** — el endpoint `/api/session/init` ya está integrado en el cliente, solo necesita el servidor
-5. **Feature flag:** licencia → bloquear módulos de pago si expirada
+   - `user_kapso_config` — api_key, phone_number_id, business_account_id por usuario
+   - `app_config` — versión mínima, canal updates, feature flags
+3. **Al login:** fetch config Kapso del usuario desde Supabase → auto-connect WhatsApp
+4. **Poner `VITE_DEV_BYPASS_AUTH=false`** en producción
 
 ---
 
 ## Fase 5 — Build + Distribución
 
-1. **Nuevo `assets/icon.ico`** — generar desde SVG con herramienta (ImageMagick, icoconvert.com)
-2. **Actualizar `package.json` build config** — nuevo `owner/repo` en GitHub publish
-3. **`.env` de producción** — variables reales, `BYPASS_AUTH=false`
-4. **Test del instalador** — `npm run dist`, instalar NSIS en VM limpia
-5. **Auto-update end-to-end** — publicar release en GitHub, verificar que la app detecta y descarga
-6. **Code signing** (opcional) — evitar warnings de Windows Defender SmartScreen
+1. **`assets/icon.ico`** — generar desde SVG
+2. **Actualizar `package.json` build config** — nuevo `owner/repo` GitHub
+3. **`.env` producción** — variables reales, `BYPASS_AUTH=false`
+4. **Test instalador** — `npm run dist`, instalar NSIS en VM limpia
+5. **Auto-update end-to-end** — publicar release GitHub, verificar detección
 
 ---
 
-## Decisiones técnicas tomadas
+## Decisiones técnicas
 
 | Decisión | Razón |
 |---|---|
-| sql.js en lugar de better-sqlite3 | Sin dependencia nativa → corre en cualquier PC sin VS Build Tools |
-| HashRouter en React | Electron sirve via `file://`, history router no funciona |
-| Provider como interface + adapters | Cambiar de WAHA a Kapso sin tocar CRM |
-| Supabase solo para cloud control | CRM siempre local, sin dependencia de internet para usar la app |
-| VITE_DEV_BYPASS_AUTH | Desarrollo sin bloqueo mientras Supabase no está configurado |
+| sql.js (WASM) no better-sqlite3 | Sin prerequisitos de compilación en PC del cliente |
+| HashRouter | Electron sirve via `file://`, history router no funciona |
+| Kapso como provider | API oficial WA, free tier viable, REST simple |
+| Conversaciones/mensajes via Kapso polling | No hay IP pública en PC del cliente para webhooks |
+| Cada cliente su propia cuenta Kapso | Multi-tenant excede free tier; Setup Links descartado por ahora |
+| Teléfonos normalizados sin 9 (54+área+número) | Formato wa_id de Kapso; UNIQUE constraint previene duplicados |
+| Sync merge: canónico = el que tiene kapso_id | El contacto ya linkeado a Kapso prevalece sobre duplicados locales |
 
 ---
 
@@ -139,7 +115,7 @@ WhatsApp (red) ←→ WAHA (Docker) ←→ WahaAdapter ←→ WhatsAppManager
 
 | Riesgo | Mitigación |
 |---|---|
-| WhatsApp bloquea número por spam masivo | Delay entre mensajes, límite de batch, avisar al usuario |
-| WAHA requiere Docker en PC del cliente | Documentar, o migrar a Kapso/Baileys si el cliente no tiene Docker |
-| sql.js más lento que better-sqlite3 en writes pesados | Aceptable para volumen de CRM (<50k contactos); escalar a better-sqlite3 si se necesita |
-| Tamaño del .exe grande por sql.js WASM | ~3MB de overhead; aceptable |
+| WhatsApp bloquea número por spam | Delay configurable entre mensajes, límite batch |
+| sql.js más lento que better-sqlite3 | Aceptable para volumen CRM (<50k contactos) |
+| Polling de Inbox consume cuota API Kapso | Intervalo 30s, solo cuando Inbox está abierto |
+| Free tier Kapso: 2000 conversaciones/mes | Advertir en UI si el cliente se acerca al límite |

@@ -9,6 +9,10 @@ Decisiones de producto, negocio y técnicas. Se actualiza a medida que evolucion
 ### Clientes independientes en Kapso
 **Decisión:** Cada cliente tiene su propia cuenta Kapso con su propia API key. No hay una cuenta central del developer.
 
+**Por qué no multi-tenant (un Kapso, múltiples Customers):** Excede el plan free de Kapso. Cada cliente en su propia cuenta está dentro del free tier.
+
+**Setup Links (descartado por ahora):** Kapso ofrece una API para onboarding embebido (cliente conecta su WA sin tocar el panel Kapso). Requiere arquitectura multi-tenant (una cuenta Kapso del developer). Viable en el futuro si se cambia el modelo de negocio (developer paga Kapso, cobra al cliente por encima).
+
 **Implicación:** La app debe guiar al cliente a conectar su propia cuenta Kapso. El developer no gestiona las credenciales de los clientes.
 
 **Lo que el cliente hace en Kapso (mínimo inevitable):**
