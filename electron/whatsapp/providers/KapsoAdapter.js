@@ -179,8 +179,9 @@ class KapsoAdapter extends IWhatsAppProvider {
         headers: { 'X-API-Key': this._apiKey },
       });
       if (!res.ok) { const t = await res.text().catch(() => ''); return { ok: false, error: `Kapso ${res.status}: ${t}` }; }
-      const data = await res.json().catch(() => ({}));
-      return { ok: true, ...data };
+      const json = await res.json().catch(() => ({}));
+      // Platform v1 wraps the phone number under `data`
+      return { ok: true, ...(json?.data ?? json) };
     } catch (err) { return { ok: false, error: err.message }; }
   }
 

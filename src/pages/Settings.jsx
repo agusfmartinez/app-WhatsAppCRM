@@ -49,7 +49,14 @@ export default function Settings() {
 
   useEffect(() => {
     window.api?.getAppInfo?.().then(setAppInfo).catch(() => {});
-    window.api?.whatsapp?.getStatus?.().then(s => setWaStatus(s?.status || 'disconnected')).catch(() => {});
+    window.api?.whatsapp?.getStatus?.().then(s => {
+      const st = s?.status || 'disconnected';
+      setWaStatus(st);
+      if (st === 'connected') {
+        window.api?.whatsapp?.getBusinessProfile?.().then(r => { if (r?.ok) setBusinessProfile(r.data ?? r); }).catch(() => {});
+        window.api?.whatsapp?.getPhoneNumberDetails?.().then(r => { if (r?.ok !== false) setPhoneDetails(r); }).catch(() => {});
+      }
+    }).catch(() => {});
     window.api?.settings?.getAll?.().then(s => {
       if (!s) return;
       if (s.wa_provider) setProvider(s.wa_provider);
@@ -70,11 +77,6 @@ export default function Settings() {
       }
     };
     window.api?.onWhatsAppEvent?.(handler);
-    // Load profile if already connected
-    if (waStatus === 'connected') {
-      window.api?.whatsapp?.getBusinessProfile?.().then(r => { if (r?.ok) setBusinessProfile(r.data ?? r); }).catch(() => {});
-      window.api?.whatsapp?.getPhoneNumberDetails?.().then(r => { if (r?.ok !== false) setPhoneDetails(r); }).catch(() => {});
-    }
     return () => window.api?.offWhatsAppEvent?.(handler);
   }, []);
 
@@ -294,13 +296,21 @@ export default function Settings() {
         <Section title="Perfil de WhatsApp Business">
           {phoneDetails && (
             <div className="space-y-2 text-sm border-b border-gray-700 pb-4 mb-4">
-              <div className="flex justify-between"><span className="text-gray-400">Número</span><span className="text-gray-200 font-mono">{phoneDetails.display_phone_number || phoneDetails.verified_name || '—'}</span></div>
+              <div className="flex justify-between"><span className="text-gray-400">Número</span><span className="text-gray-200 font-mono">{phoneDetails.display_phone_number || '—'}</span></div>
+              {phoneDetails.verified_name && (
+                <div className="flex justify-between"><span className="text-gray-400">Nombre verificado</span><span className="text-gray-200">{phoneDetails.verified_name}</span></div>
+              )}
+              <div className="flex justify-between"><span className="text-gray-400">Estado</span>
+                <span className={`font-medium ${phoneDetails.status === 'CONNECTED' ? 'text-green-400' : 'text-gray-200'}`}>
+                  {phoneDetails.status || '—'}
+                </span>
+              </div>
               <div className="flex justify-between"><span className="text-gray-400">Calidad</span>
-                <span className={`font-medium ${phoneDetails.quality_rating === 'GREEN' ? 'text-green-400' : phoneDetails.quality_rating === 'YELLOW' ? 'text-yellow-400' : 'text-red-400'}`}>
+                <span className={`font-medium ${phoneDetails.quality_rating === 'GREEN' ? 'text-green-400' : phoneDetails.quality_rating === 'YELLOW' ? 'text-yellow-400' : phoneDetails.quality_rating === 'RED' ? 'text-red-400' : 'text-gray-200'}`}>
                   {phoneDetails.quality_rating || '—'}
                 </span>
               </div>
-              <div className="flex justify-between"><span className="text-gray-400">Estado verificación</span><span className="text-gray-200">{phoneDetails.code_verification_status || '—'}</span></div>
+              <div className="flex justify-between"><span className="text-gray-400">Verificación</span><span className="text-gray-200">{phoneDetails.code_verification_status || '—'}</span></div>
             </div>
           )}
           {businessProfile && (

@@ -43,10 +43,11 @@
 - ✅ Sync contactos Kapso → DB local (con merge de variantes argentinas 549/54)
 - ✅ Templates: listar, crear, eliminar desde la app
 - ✅ Campañas: envío masivo de templates con delay configurable
+- ✅ Inbox: polling de conversaciones y mensajes reales desde Kapso Platform v1
+- ✅ Inbox: envío manual + preview, no-leídos, guard ventana 24hs, separadores de fecha
+- ✅ Settings: info real del número conectado (status, display_phone_number, quality_rating, verified_name)
 
 **Pendiente:**
-- 🔜 Inbox: polling de conversaciones y mensajes reales desde Kapso Platform v1
-- 🔜 Inbox: envío de mensajes manuales desde conversación activa
 - 🔜 Onboarding wizard: guía para que el cliente configure Kapso (3 pasos)
 
 **Arquitectura de datos:**
