@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const path = require("path");
 const os = require("os");
 const { initLogger, createLogger } = require("./logger");
@@ -239,6 +239,12 @@ ipcMain.handle('app:info', () => {
 });
 
 ipcMain.handle('app:forceUpdate', () => { return { ok: true }; });
+
+ipcMain.handle('app:open-external', async (_e, url) => {
+  if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return { ok: false, error: 'URL inválida' };
+  await shell.openExternal(url);
+  return { ok: true };
+});
 
 // ─── Auto-connect WhatsApp from saved settings ────────────────────────────────
 

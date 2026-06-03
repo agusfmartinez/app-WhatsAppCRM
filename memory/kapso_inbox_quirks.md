@@ -20,6 +20,14 @@ Quirks de la API Kapso confirmados por payloads reales del inbox. Ver [[project-
 - Payload trae: `kapso.direction` (inbound/outbound), `text.body` / `kapso.content`, `timestamp` (unix segundos como string), `kapso.whatsapp_conversation_id`.
 - Platform v1 SIEMPRE incluye `direction` — por eso se migró desde el meta-proxy que no lo daba confiable.
 
+## Templates = Meta Graph API 1:1 (proxy)
+
+- Endpoint `/meta/whatsapp/v24.0/{business_account_id}/message_templates` es proxy directo de Meta Graph. Request/response idénticos a Meta.
+- **Respuesta GET envuelve la lista en `data`** (igual que phone-details). `getTemplates` normaliza `res.data → templates`. La UI lee `r.templates`. (Bug previo: leía `r.templates` con adapter devolviendo `data` → siempre vacío.)
+- **Crear con botones:** component `{type:'BUTTONS', buttons:[...]}`, máx 3. Tipos: `QUICK_REPLY {text}`, `URL {text,url,example?}` (example si url tiene var), `PHONE_NUMBER {text,phone_number}`.
+- Header TEXT con `{{1}}` requiere `example.header_text:[valor]` o Meta rechaza. Body vars: `example.body_text:[[v1,v2]]`.
+- Patrón general: **cualquier endpoint meta-proxy de Kapso envuelve en `data`** — desenvolver siempre.
+
 ## Imposibles con Kapso actual
 
 - **Badge de no-leídos:** Kapso solo da `status` (`ended`/activo) en la conv, no un count de no leídos. No hay fuente.

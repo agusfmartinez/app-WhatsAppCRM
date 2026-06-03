@@ -117,20 +117,47 @@ class KapsoAdapter extends IWhatsAppProvider {
 
   // ── Templates ─────────────────────────────────────────────────────────────
 
-  async getTemplates() {
+  async getTemplates({ limit = 50, after } = {}) {
     if (!this._apiKey || !this._businessAccountId) return { ok: false, error: 'Business Account ID no configurado' };
-    const res = await this._get(`/${this._businessAccountId}/message_templates`);
-    return res;
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (after) params.set('after', after);
+    const res = await this._get(`/${this._businessAccountId}/message_templates?${params}`);
+    if (!res.ok) return res;
+    // Meta returns templates under `data` — normalize to `templates`.
+    // Next-page cursor only valid when paging.next exists.
+    const after_ = res.paging?.next ? res.paging?.cursors?.after : null;
+    return { ok: true, templates: res.data ?? [], after: after_, businessAccountId: this._businessAccountId };
   }
 
-  async createTemplate({ name, language = 'es_AR', category = 'MARKETING', body, variables = [], footer, headerText } = {}) {
+  async createTemplate({ name, language = 'es_AR', category = 'MARKETING', body, variables = [], footer, headerText, headerExample, buttons = [] } = {}) {
     if (!this._apiKey || !this._businessAccountId) return { ok: false, error: 'No conectado o sin Business Account ID' };
     const components = [];
-    if (headerText) components.push({ type: 'HEADER', format: 'TEXT', text: headerText });
+
+    if (headerText) {
+      const header = { type: 'HEADER', format: 'TEXT', text: headerText };
+      // Meta requires an example value when the header has a {{1}} variable
+      if (/\{\{\d+\}\}/.test(headerText) && headerExample) header.example = { header_text: [headerExample] };
+      components.push(header);
+    }
+
     const bodyComponent = { type: 'BODY', text: body };
     if (variables.length) bodyComponent.example = { body_text: [variables] };
     components.push(bodyComponent);
+
     if (footer) components.push({ type: 'FOOTER', text: footer });
+
+    // Buttons: QUICK_REPLY | URL | PHONE_NUMBER (max 3)
+    const btns = (buttons || []).filter(b => b?.text?.trim()).slice(0, 3).map(b => {
+      if (b.type === 'URL') {
+        const out = { type: 'URL', text: b.text, url: b.url || '' };
+        if (/\{\{\d+\}\}/.test(out.url) && b.example) out.example = [b.example];
+        return out;
+      }
+      if (b.type === 'PHONE_NUMBER') return { type: 'PHONE_NUMBER', text: b.text, phone_number: String(b.phone_number || '').replace(/[^0-9+]/g, '') };
+      return { type: 'QUICK_REPLY', text: b.text };
+    });
+    if (btns.length) components.push({ type: 'BUTTONS', buttons: btns });
+
     return this._post(`/${this._businessAccountId}/message_templates`, {
       name: name.toLowerCase().replace(/\s+/g, '_'),
       language, category,

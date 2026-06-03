@@ -63,7 +63,7 @@ function createWhatsAppManager(onEvent) {
     listWaContacts: (opts) => _delegate('listWaContacts', opts),
 
     // Templates
-    getTemplates: () => _delegate('getTemplates'),
+    getTemplates: (opts) => _delegate('getTemplates', opts),
     createTemplate: (data) => _delegate('createTemplate', data),
     deleteTemplate: (name) => _delegate('deleteTemplate', name),
 

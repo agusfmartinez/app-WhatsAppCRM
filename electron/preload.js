@@ -84,13 +84,14 @@ contextBridge.exposeInMainWorld('api', {
     // Messages
     listMessages: (opts) => ipcRenderer.invoke('crm:whatsapp:list-messages', opts),
     sendMessage: (to, body) => ipcRenderer.invoke('crm:whatsapp:send-message', to, body),
+    sendTemplate: (to, name, lang, components) => ipcRenderer.invoke('crm:whatsapp:send-template', to, name, lang, components),
 
     // Conversations
     listConversations: (opts) => ipcRenderer.invoke('crm:whatsapp:list-conversations', opts),
     getConversation: (id) => ipcRenderer.invoke('crm:whatsapp:get-conversation', id),
 
     // Templates
-    getTemplates: () => ipcRenderer.invoke('crm:whatsapp:templates'),
+    getTemplates: (opts) => ipcRenderer.invoke('crm:whatsapp:templates', opts),
     createTemplate: (data) => ipcRenderer.invoke('crm:whatsapp:create-template', data),
     deleteTemplate: (name) => ipcRenderer.invoke('crm:whatsapp:delete-template', name),
 
@@ -109,6 +110,9 @@ contextBridge.exposeInMainWorld('api', {
     blockUser: (phone) => ipcRenderer.invoke('crm:whatsapp:block-user', phone),
     unblockUser: (phone) => ipcRenderer.invoke('crm:whatsapp:unblock-user', phone),
   },
+
+  // Open a URL in the system browser
+  openExternal: (url) => ipcRenderer.invoke('app:open-external', url),
 });
 
 contextBridge.exposeInMainWorld('updater', {

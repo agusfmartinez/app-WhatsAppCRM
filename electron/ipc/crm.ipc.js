@@ -257,13 +257,14 @@ function initCrm(ipcMain, waManager) {
   // ── WhatsApp: messages ────────────────────────────────────────────────────
   ipcMain.handle('crm:whatsapp:list-messages', async (_e, opts) => waManager.listMessages(opts));
   ipcMain.handle('crm:whatsapp:send-message', async (_e, to, body) => waManager.sendMessage(to, body));
+  ipcMain.handle('crm:whatsapp:send-template', async (_e, to, name, lang, components) => waManager.sendTemplate(to, name, lang, components));
 
   // ── WhatsApp: conversations ───────────────────────────────────────────────
   ipcMain.handle('crm:whatsapp:list-conversations', async (_e, opts) => waManager.listConversations(opts));
   ipcMain.handle('crm:whatsapp:get-conversation', async (_e, id) => waManager.getConversation(id));
 
   // ── WhatsApp: templates ───────────────────────────────────────────────────
-  ipcMain.handle('crm:whatsapp:templates', async () => waManager.getTemplates());
+  ipcMain.handle('crm:whatsapp:templates', async (_e, opts) => waManager.getTemplates(opts));
   ipcMain.handle('crm:whatsapp:create-template', async (_e, data) => waManager.createTemplate(data));
   ipcMain.handle('crm:whatsapp:delete-template', async (_e, name) => waManager.deleteTemplate(name));
 
