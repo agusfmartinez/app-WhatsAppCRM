@@ -2,6 +2,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { clearSession } from '../lib/session';
+import OnboardingWizard from './OnboardingWizard.jsx';
 
 const NAV = [
   {
@@ -41,10 +42,20 @@ function navClass({ isActive }) {
 export default function Layout() {
   const [waStatus, setWaStatus] = useState('disconnected');
   const [appVersion, setAppVersion] = useState('');
+  const [showWizard, setShowWizard] = useState(false);
 
   useEffect(() => {
-    window.api?.whatsapp?.getStatus?.().then(s => setWaStatus(s?.status || 'disconnected')).catch(() => {});
     window.api?.getAppInfo?.().then(i => setAppVersion(i?.appVersion || '')).catch(() => {});
+
+    // Decide whether to show onboarding: no saved API key AND not connected.
+    (async () => {
+      const [status, apiKey] = await Promise.all([
+        window.api?.whatsapp?.getStatus?.().catch(() => null),
+        window.api?.settings?.get?.('wa_api_key').catch(() => null),
+      ]);
+      setWaStatus(status?.status || 'disconnected');
+      if (!apiKey && status?.status !== 'connected') setShowWizard(true);
+    })();
 
     const handler = (e) => { if (e.type === 'status') setWaStatus(e.status); };
     window.api?.onWhatsAppEvent?.(handler);
@@ -116,6 +127,13 @@ export default function Layout() {
       <main className="flex-1 overflow-auto">
         <Outlet />
       </main>
+
+      {showWizard && (
+        <OnboardingWizard
+          onDone={() => { setShowWizard(false); setWaStatus('connected'); }}
+          onSkip={() => setShowWizard(false)}
+        />
+      )}
     </div>
   );
 }

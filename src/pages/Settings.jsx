@@ -1,16 +1,29 @@
 import { useEffect, useState } from 'react';
+import OnboardingWizard from '../components/OnboardingWizard.jsx';
 
-const PROVIDERS = [
-  { value: 'kapso', label: 'Kapso', desc: 'API oficial de WhatsApp Business' },
-  { value: 'waha', label: 'WAHA', desc: 'WhatsApp HTTP API (self-hosted)' },
-  { value: 'baileys', label: 'Baileys', desc: 'Librería open-source (no oficial)' },
+const inputCls = 'w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-green-500';
+// Same box, but signals read-only when disabled (no layout shift on edit toggle)
+const fieldCls = `${inputCls} disabled:bg-gray-900/50 disabled:border-gray-700 disabled:text-gray-300 disabled:cursor-default`;
+
+// Meta WhatsApp business verticals
+const VERTICALS = [
+  { value: 'OTHER', label: 'Otro' },
+  { value: 'AUTO', label: 'Automotor' },
+  { value: 'BEAUTY', label: 'Belleza / Spa' },
+  { value: 'APPAREL', label: 'Indumentaria' },
+  { value: 'EDU', label: 'Educación' },
+  { value: 'ENTERTAIN', label: 'Entretenimiento' },
+  { value: 'EVENT_PLAN', label: 'Eventos' },
+  { value: 'FINANCE', label: 'Finanzas' },
+  { value: 'GROCERY', label: 'Almacén / Supermercado' },
+  { value: 'HOTEL', label: 'Hotelería' },
+  { value: 'HEALTH', label: 'Salud' },
+  { value: 'NONPROFIT', label: 'ONG' },
+  { value: 'PROF_SERVICES', label: 'Servicios profesionales' },
+  { value: 'RETAIL', label: 'Comercio / Retail' },
+  { value: 'TRAVEL', label: 'Viajes' },
+  { value: 'RESTAURANT', label: 'Restaurante' },
 ];
-
-const PROVIDER_FIELDS = {
-  kapso:   { apiKeyLabel: 'API Key (X-API-Key)', apiUrlLabel: 'Phone Number ID', apiUrlPlaceholder: '12013619638', showBusinessId: true },
-  waha:    { apiKeyLabel: 'API Key', apiUrlLabel: 'URL del servidor WAHA', apiUrlPlaceholder: 'http://localhost:3000', showBusinessId: false },
-  baileys: { apiKeyLabel: '—', apiUrlLabel: '—', apiUrlPlaceholder: '', showBusinessId: false },
-};
 
 function Section({ title, children }) {
   return (
@@ -30,22 +43,36 @@ function Field({ label, children }) {
   );
 }
 
+function ReadOnly({ label, value, mono }) {
+  return (
+    <div>
+      <span className="text-xs text-gray-400 uppercase tracking-wide">{label}</span>
+      <div className={`mt-1 bg-gray-900/50 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300 truncate ${mono ? 'font-mono' : ''}`}>
+        {value || '—'}
+      </div>
+    </div>
+  );
+}
+
 export default function Settings() {
   const [appInfo, setAppInfo] = useState(null);
   const [waStatus, setWaStatus] = useState('disconnected');
-  const [provider, setProvider] = useState('kapso');
-  const [apiKey, setApiKey] = useState('');
   const [apiUrl, setApiUrl] = useState('');
   const [businessAccountId, setBusinessAccountId] = useState('');
   const [delay, setDelay] = useState('2000');
   const [batchSize, setBatchSize] = useState('10');
   const [saving, setSaving] = useState(false);
-  const [connecting, setConnecting] = useState(false);
-  const [detecting, setDetecting] = useState(false);
-  const [detectedNumbers, setDetectedNumbers] = useState([]);
   const [businessProfile, setBusinessProfile] = useState(null);
   const [phoneDetails, setPhoneDetails] = useState(null);
   const [msg, setMsg] = useState(null);
+  const [showWizard, setShowWizard] = useState(false);
+  const [profileForm, setProfileForm] = useState({ about: '', description: '', email: '', address: '', vertical: '', websites: '' });
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [editingCampaign, setEditingCampaign] = useState(false);
+  const [displayName, setDisplayName] = useState('');
+  const [submittingName, setSubmittingName] = useState(false);
+  const [displayRequests, setDisplayRequests] = useState([]);
 
   useEffect(() => {
     window.api?.getAppInfo?.().then(setAppInfo).catch(() => {});
@@ -53,14 +80,13 @@ export default function Settings() {
       const st = s?.status || 'disconnected';
       setWaStatus(st);
       if (st === 'connected') {
-        window.api?.whatsapp?.getBusinessProfile?.().then(r => { if (r?.ok) setBusinessProfile(r.data ?? r); }).catch(() => {});
+        loadProfile();
+        loadDisplayRequests();
         window.api?.whatsapp?.getPhoneNumberDetails?.().then(r => { if (r?.ok !== false) setPhoneDetails(r); }).catch(() => {});
       }
     }).catch(() => {});
     window.api?.settings?.getAll?.().then(s => {
       if (!s) return;
-      if (s.wa_provider) setProvider(s.wa_provider);
-      if (s.wa_api_key) setApiKey(s.wa_api_key);
       if (s.wa_api_url) setApiUrl(s.wa_api_url);
       if (s.wa_business_account_id) setBusinessAccountId(s.wa_business_account_id);
       if (s.campaign_delay) setDelay(String(s.campaign_delay));
@@ -71,7 +97,8 @@ export default function Settings() {
       if (e.type === 'status') {
         setWaStatus(e.status);
         if (e.status === 'connected') {
-          window.api?.whatsapp?.getBusinessProfile?.().then(r => { if (r?.ok) setBusinessProfile(r.data ?? r); }).catch(() => {});
+          loadProfile();
+          loadDisplayRequests();
           window.api?.whatsapp?.getPhoneNumberDetails?.().then(r => { if (r?.ok !== false) setPhoneDetails(r); }).catch(() => {});
         }
       }
@@ -85,14 +112,27 @@ export default function Settings() {
     setTimeout(() => setMsg(null), 3000);
   };
 
+  // Meta returns the business profile under data[] — flatten and hydrate the form
+  const loadProfile = () => {
+    window.api?.whatsapp?.getBusinessProfile?.().then(r => {
+      if (r?.ok === false) return;
+      const p = r?.data?.[0] ?? r?.data ?? r ?? {};
+      setBusinessProfile(p);
+      setProfileForm({
+        about: p.about || '',
+        description: p.description || '',
+        email: p.email || '',
+        address: p.address || '',
+        vertical: p.vertical || '',
+        websites: Array.isArray(p.websites) ? p.websites.join('\n') : (p.websites || ''),
+      });
+    }).catch(() => {});
+  };
+
   const saveSettings = async () => {
     setSaving(true);
     try {
       await Promise.all([
-        window.api?.settings?.set('wa_provider', provider),
-        window.api?.settings?.set('wa_api_key', apiKey),
-        window.api?.settings?.set('wa_api_url', apiUrl),
-        window.api?.settings?.set('wa_business_account_id', businessAccountId),
         window.api?.settings?.set('campaign_delay', Number(delay)),
         window.api?.settings?.set('campaign_batch', Number(batchSize)),
       ]);
@@ -104,20 +144,46 @@ export default function Settings() {
     }
   };
 
-  const handleConnect = async () => {
-    setConnecting(true);
+  const saveProfile = async () => {
+    setSavingProfile(true);
     try {
-      // Map fields to provider-specific config
-      const config = provider === 'kapso'
-        ? { apiKey, phoneNumberId: apiUrl, businessAccountId }
-        : { apiKey, apiUrl };
-      const res = await window.api?.whatsapp?.connect({ providerName: provider, config });
-      if (res?.ok) showMsg('Conectado a WhatsApp');
-      else showMsg(res?.error || 'Error al conectar', 'error');
+      const websites = profileForm.websites.split(/[\n,]/).map(w => w.trim()).filter(Boolean);
+      const body = {
+        messaging_product: 'whatsapp',
+        about: profileForm.about || undefined,
+        description: profileForm.description || undefined,
+        email: profileForm.email || undefined,
+        address: profileForm.address || undefined,
+        vertical: profileForm.vertical || undefined,
+        ...(websites.length ? { websites } : {}),
+      };
+      const res = await window.api?.whatsapp?.updateBusinessProfile?.(body);
+      if (res?.ok !== false) { showMsg('Perfil actualizado'); loadProfile(); }
+      else showMsg(res?.error || 'Error al actualizar el perfil', 'error');
     } catch (err) {
-      showMsg(err.message, 'error');
+      showMsg('Error: ' + err.message, 'error');
     } finally {
-      setConnecting(false);
+      setSavingProfile(false);
+    }
+  };
+
+  const loadDisplayRequests = () => {
+    window.api?.whatsapp?.getDisplayNameRequests?.().then(r => {
+      if (r?.ok) setDisplayRequests(r.requests || []);
+    }).catch(() => {});
+  };
+
+  const submitDisplayName = async () => {
+    if (!displayName.trim()) return;
+    setSubmittingName(true);
+    const res = await window.api?.whatsapp?.submitDisplayName?.(displayName.trim());
+    setSubmittingName(false);
+    if (res?.ok) {
+      showMsg('Nombre enviado a revisión de Meta');
+      setDisplayName('');
+      loadDisplayRequests();
+    } else {
+      showMsg(res?.error || 'Error al enviar el nombre', 'error');
     }
   };
 
@@ -127,8 +193,9 @@ export default function Settings() {
   };
 
   return (
-    <div className="p-8 max-w-2xl space-y-6">
-      <div className="mb-2">
+    // <div className="p-8 max-w-2xl space-y-6">
+    <div className="p-8">
+      <div className="mb-8">
         <h1 className="text-2xl font-bold text-white">Configuración</h1>
         <p className="text-sm text-gray-400 mt-1">Ajustes de WhatsApp y la aplicación</p>
       </div>
@@ -139,206 +206,190 @@ export default function Settings() {
         </div>
       )}
 
-      {/* WhatsApp connection */}
-      <Section title="Conexión WhatsApp">
-        <Field label="Proveedor">
-          <div className="grid grid-cols-3 gap-2">
-            {PROVIDERS.map(p => (
-              <button key={p.value} onClick={() => setProvider(p.value)}
-                className={`rounded-lg border px-3 py-2.5 text-left transition-colors ${provider === p.value ? 'border-green-500 bg-green-500/10' : 'border-gray-700 bg-gray-800/50 hover:border-gray-600'}`}
-              >
-                <div className={`text-sm font-medium ${provider === p.value ? 'text-green-400' : 'text-gray-300'}`}>{p.label}</div>
-                <div className="text-[10px] text-gray-500 mt-0.5">{p.desc}</div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* WhatsApp config */}
+        <Section title="Configurar WhatsApp">
+          {waStatus !== 'connected' ? (
+            <div className="flex items-center justify-between rounded-lg bg-green-500/5 border border-green-500/15 px-4 py-4">
+              <div>
+                <p className="text-sm font-medium text-gray-100">Conectá tu número de WhatsApp</p>
+                <p className="text-xs text-gray-400 mt-0.5">Te guiamos paso a paso con Kapso.</p>
+              </div>
+              <button onClick={() => setShowWizard(true)} className="px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 text-xs font-medium text-white shrink-0 transition-colors">
+                Asistente de conexión
               </button>
-            ))}
-          </div>
-        </Field>
-        {PROVIDER_FIELDS[provider]?.apiKeyLabel !== '—' && (
-          <Field label={PROVIDER_FIELDS[provider]?.apiKeyLabel ?? 'API Key'}>
-            <div className="flex gap-2">
-              <input
-                type="password"
-                value={apiKey}
-                onChange={e => setApiKey(e.target.value)}
-                placeholder="••••••••"
-                className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-green-500"
-              />
-              {provider === 'kapso' && (
-                <button
-                  type="button"
-                  disabled={!apiKey || detecting}
-                  onClick={async () => {
-                    setDetecting(true);
-                    const res = await window.api?.whatsapp?.detectNumbers?.(apiKey);
-                    setDetecting(false);
-                    if (!res?.ok) return showMsg(res?.error || 'Error detectando números', 'error');
-                    const nums = res.phoneNumbers || [];
-                    setDetectedNumbers(nums);
-                    if (nums.length === 1) {
-                      setApiUrl(nums[0].phone_number_id);
-                      setBusinessAccountId(nums[0].business_account_id);
-                      showMsg(`Detectado: ${nums[0].display_phone_number || nums[0].phone_number_id} · ${nums[0].verified_name || ''} · ${nums[0].status || ''}`);
-                    } else if (nums.length === 0) {
-                      showMsg('Sin números en este proyecto', 'error');
-                    }
-                  }}
-                  className="px-3 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 disabled:opacity-40 text-xs text-gray-200 shrink-0 transition-colors"
-                >
-                  {detecting ? '...' : 'Detectar'}
-                </button>
-              )}
             </div>
-            {/* Multiple numbers selector */}
-            {detectedNumbers.length > 1 && (
-              <div className="mt-2 space-y-1">
-                <span className="text-[11px] text-gray-400">Seleccioná un número:</span>
-                {detectedNumbers.map(n => (
-                  <button
-                    key={n.phone_number_id}
-                    type="button"
-                    onClick={() => {
-                      setApiUrl(n.phone_number_id);
-                      setBusinessAccountId(n.business_account_id);
-                      setDetectedNumbers([]);
-                      showMsg(`Seleccionado: ${n.display_phone_number}`);
-                    }}
-                    className="w-full text-left px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-gray-100 transition-colors"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium">{n.display_phone_number || n.phone_number_id}</span>
-                      {n.status && <span className={`text-[11px] font-medium ${n.status === 'CONNECTED' ? 'text-green-400' : 'text-yellow-400'}`}>{n.status}</span>}
-                    </div>
-                    <div className="text-gray-400 text-xs">{n.verified_name} · {n.kind}</div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </Field>
-        )}
-        {PROVIDER_FIELDS[provider]?.apiUrlLabel !== '—' && (
-          <Field label={PROVIDER_FIELDS[provider]?.apiUrlLabel ?? 'URL / ID'}>
-            <input
-              type="text"
-              value={apiUrl}
-              onChange={e => setApiUrl(e.target.value)}
-              placeholder={PROVIDER_FIELDS[provider]?.apiUrlPlaceholder ?? ''}
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-green-500"
-            />
-          </Field>
-        )}
-        {PROVIDER_FIELDS[provider]?.showBusinessId && (
-          <Field label="Business Account ID (WABA ID)">
-            <input
-              type="text"
-              value={businessAccountId}
-              onChange={e => setBusinessAccountId(e.target.value)}
-              placeholder="2750692328664321"
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-green-500"
-            />
-            <span className="text-[11px] text-gray-500 mt-1 block">Necesario para listar templates. Está en el panel de Kapso junto a tu Phone Number ID.</span>
-          </Field>
-        )}
-
-        <div className="flex items-center gap-3 pt-1">
-          <div className="flex items-center gap-2 flex-1">
-            <span className={`h-2 w-2 rounded-full ${waStatus === 'connected' ? 'bg-green-500' : waStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' : 'bg-gray-500'}`} />
-            <span className="text-sm text-gray-400 capitalize">Estado: {waStatus}</span>
-          </div>
-          {waStatus === 'connected' ? (
-            <button onClick={handleDisconnect} className="px-4 py-2 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 text-sm transition-colors">
-              Desconectar
-            </button>
           ) : (
-            <button onClick={handleConnect} disabled={connecting || !apiKey} className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-40 text-sm font-medium text-white transition-colors">
-              {connecting ? 'Conectando...' : 'Conectar'}
-            </button>
-          )}
-        </div>
-      </Section>
-
-      {/* Campaign settings */}
-      <Section title="Configuración de campañas">
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="Delay entre mensajes (ms)">
-            <input
-              type="number"
-              min="500"
-              max="30000"
-              value={delay}
-              onChange={e => setDelay(e.target.value)}
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-green-500"
-            />
-          </Field>
-          <Field label="Tamaño de lote">
-            <input
-              type="number"
-              min="1"
-              max="100"
-              value={batchSize}
-              onChange={e => setBatchSize(e.target.value)}
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-green-500"
-            />
-          </Field>
-        </div>
-      </Section>
-
-      {/* App info */}
-      <Section title="Información de la aplicación">
-        <div className="space-y-2 text-sm">
-          <div className="flex justify-between"><span className="text-gray-400">Versión</span><span className="text-gray-200">{appInfo?.appVersion || '—'}</span></div>
-          <div className="flex justify-between"><span className="text-gray-400">Dispositivo</span><span className="text-gray-200">{appInfo?.deviceName || '—'}</span></div>
-          <div className="flex justify-between"><span className="text-gray-400">Sistema</span><span className="text-gray-200">{appInfo?.os || '—'}</span></div>
-        </div>
-      </Section>
-
-      {/* WhatsApp Business Profile */}
-      {waStatus === 'connected' && (
-        <Section title="Perfil de WhatsApp Business">
-          {phoneDetails && (
-            <div className="space-y-2 text-sm border-b border-gray-700 pb-4 mb-4">
-              <div className="flex justify-between"><span className="text-gray-400">Número</span><span className="text-gray-200 font-mono">{phoneDetails.display_phone_number || '—'}</span></div>
-              {phoneDetails.verified_name && (
-                <div className="flex justify-between"><span className="text-gray-400">Nombre verificado</span><span className="text-gray-200">{phoneDetails.verified_name}</span></div>
-              )}
-              <div className="flex justify-between"><span className="text-gray-400">Estado</span>
-                <span className={`font-medium ${phoneDetails.status === 'CONNECTED' ? 'text-green-400' : 'text-gray-200'}`}>
-                  {phoneDetails.status || '—'}
-                </span>
+            <>
+              {/* Status + actions */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-green-500" />
+                  <span className="text-sm text-gray-300">Conectado</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setShowWizard(true)} className="px-3 py-1.5 rounded-lg border border-gray-700 text-xs text-gray-300 hover:text-white hover:border-gray-600 transition-colors">Reconectar</button>
+                  <button onClick={handleDisconnect} className="px-3 py-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs transition-colors">Desconectar</button>
+                </div>
               </div>
-              <div className="flex justify-between"><span className="text-gray-400">Calidad</span>
-                <span className={`font-medium ${phoneDetails.quality_rating === 'GREEN' ? 'text-green-400' : phoneDetails.quality_rating === 'YELLOW' ? 'text-yellow-400' : phoneDetails.quality_rating === 'RED' ? 'text-red-400' : 'text-gray-200'}`}>
-                  {phoneDetails.quality_rating || '—'}
-                </span>
+
+              {/* Read-only identifiers */}
+              <div className="grid grid-cols-2 gap-3">
+                <ReadOnly label="Número" value={phoneDetails?.display_phone_number} mono />
+                <ReadOnly label="Nombre verificado" value={phoneDetails?.verified_name} />
+                <ReadOnly label="Phone Number ID" value={apiUrl} mono />
+                <ReadOnly label="Business Account ID" value={businessAccountId} mono />
               </div>
-              <div className="flex justify-between"><span className="text-gray-400">Verificación</span><span className="text-gray-200">{phoneDetails.code_verification_status || '—'}</span></div>
-            </div>
-          )}
-          {businessProfile && (
-            <div className="space-y-3">
-              {[['Descripción', 'about'], ['Dirección', 'address'], ['Email', 'email'], ['Sitio web', 'websites']].map(([label, key]) => {
-                const val = key === 'websites' ? businessProfile.websites?.[0] : businessProfile[key];
-                return val ? (
-                  <div key={key} className="flex justify-between text-sm">
-                    <span className="text-gray-400">{label}</span>
-                    <span className="text-gray-200 text-right max-w-xs truncate">{val}</span>
-                  </div>
-                ) : null;
-              })}
-            </div>
-          )}
-          {!businessProfile && !phoneDetails && (
-            <p className="text-xs text-gray-500">Conectate a WhatsApp para ver el perfil del negocio.</p>
+
+              {/* Editar Display name (Meta review) */}
+              <div className="border-t border-gray-700 pt-4 space-y-2">
+                <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wide">Editar Nombre verificado</h3>
+                <p className="text-xs text-gray-500">Es el nombre que ven tus clientes. Sujeto a revisión de Meta (24-48hs).</p>
+                {displayRequests[0] && displayRequests[0].status !== 'applied' && (
+                  <p className="text-[11px] text-yellow-400">
+                    Solicitud "{displayRequests[0].requested_display_name}" — estado: {displayRequests[0].status}
+                    {displayRequests[0].meta_error_message ? ` (${displayRequests[0].meta_error_message})` : ''}
+                  </p>
+                )}
+                <div className="flex gap-2">
+                  <input value={displayName} onChange={e => setDisplayName(e.target.value.slice(0, 256))}
+                    placeholder='Nuevo nombre' className={inputCls} />
+                  <button onClick={submitDisplayName} disabled={!displayName.trim() || submittingName}
+                    className="px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-xs text-gray-200 shrink-0 transition-colors">
+                    {submittingName ? '...' : 'Enviar a revisión'}
+                  </button>
+                </div>
+              </div>
+            </>
           )}
         </Section>
-      )}
 
-      <button
-        onClick={saveSettings}
-        disabled={saving}
-        className="w-full py-2.5 rounded-xl bg-green-600 hover:bg-green-500 disabled:opacity-40 text-sm font-medium text-white transition-colors"
-      >
-        {saving ? 'Guardando...' : 'Guardar cambios'}
-      </button>
+        {/* Business profile */}
+        <Section title="Perfil de WhatsApp Business">
+          {waStatus !== 'connected' ? (
+            <></>
+          ) : (
+            <>
+              {/* Business profile — read-only with edit toggle */}
+              
+              <div className="flex items-center justify-between">
+                {/* <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wide">Perfil del negocio</h3> */}
+                <p className="text-xs text-gray-500">Administra el perfil público que se muestra a los usuarios en WhatsApp.</p>
+                {!editingProfile && (
+                  <button onClick={() => setEditingProfile(true)} className="text-xs text-green-400 hover:text-green-300">Editar</button>
+                )}
+              </div>
+                
+
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Descripción corta">
+                  <input disabled={!editingProfile} value={profileForm.about} onChange={e => setProfileForm(f => ({ ...f, about: e.target.value }))}
+                    placeholder="Ej: Atención al cliente" className={fieldCls} />
+                </Field>
+                <Field label="Email">
+                  <input disabled={!editingProfile} value={profileForm.email} onChange={e => setProfileForm(f => ({ ...f, email: e.target.value }))}
+                    placeholder="negocio@ejemplo.com" className={fieldCls} />
+                </Field>
+                <Field label="Dirección">
+                  <input disabled={!editingProfile} value={profileForm.address} onChange={e => setProfileForm(f => ({ ...f, address: e.target.value }))}
+                    placeholder="Dirección del negocio" className={fieldCls} />
+                </Field>
+                <Field label="Rubro">
+                  <select disabled={!editingProfile} value={profileForm.vertical} onChange={e => setProfileForm(f => ({ ...f, vertical: e.target.value }))} className={fieldCls}>
+                    <option value="">—</option>
+                    {VERTICALS.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}
+                  </select>
+                </Field>
+                <div className="col-span-2">
+                  <Field label="Descripción">
+                    <textarea disabled={!editingProfile} value={profileForm.description} onChange={e => setProfileForm(f => ({ ...f, description: e.target.value }))}
+                      rows={2} placeholder="Describí tu negocio" className={`${fieldCls} resize-none`} />
+                  </Field>
+                </div>
+                <div className="col-span-2">
+                  <Field label="Sitios web">
+                    <textarea disabled={!editingProfile} value={profileForm.websites} onChange={e => setProfileForm(f => ({ ...f, websites: e.target.value }))}
+                      rows={2} placeholder="Un sitio por línea" className={`${fieldCls} resize-none font-mono text-xs`} />
+                  </Field>
+                </div>
+              </div>
+
+              {editingProfile && (
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => { setEditingProfile(false); loadProfile(); }}
+                    className="px-4 py-2 rounded-lg border border-gray-700 text-sm text-gray-400 hover:text-gray-200 hover:border-gray-600 transition-colors">
+                    Cancelar
+                  </button>
+                  <button onClick={async () => { await saveProfile(); setEditingProfile(false); }} disabled={savingProfile}
+                    className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-40 text-sm font-medium text-white transition-colors">
+                    {savingProfile ? 'Guardando…' : 'Guardar perfil'}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </Section>
+
+        {/* Campaign settings */}
+        <Section title="Configuración de campañas">
+          <div className="flex items-center justify-end -mt-2">
+            {!editingCampaign && (
+              <button onClick={() => setEditingCampaign(true)} className="text-xs text-green-400 hover:text-green-300">Editar</button>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Delay entre mensajes (ms)">
+              <input type="number" min="500" max="30000" disabled={!editingCampaign} value={delay} onChange={e => setDelay(e.target.value)} className={fieldCls} />
+            </Field>
+            <Field label="Tamaño de lote">
+              <input type="number" min="1" max="100" disabled={!editingCampaign} value={batchSize} onChange={e => setBatchSize(e.target.value)} className={fieldCls} />
+            </Field>
+          </div>
+          {editingCampaign && (
+            <div className="flex justify-end gap-2">
+              <button onClick={() => {
+                setEditingCampaign(false);
+                window.api?.settings?.getAll?.().then(s => {
+                  if (s?.campaign_delay) setDelay(String(s.campaign_delay));
+                  if (s?.campaign_batch) setBatchSize(String(s.campaign_batch));
+                }).catch(() => {});
+              }} className="px-4 py-2 rounded-lg border border-gray-700 text-sm text-gray-400 hover:text-gray-200 hover:border-gray-600 transition-colors">
+                Cancelar
+              </button>
+              <button onClick={async () => { await saveSettings(); setEditingCampaign(false); }} disabled={saving}
+                className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-40 text-sm font-medium text-white transition-colors">
+                {saving ? 'Guardando…' : 'Guardar'}
+              </button>
+            </div>
+          )}
+        </Section>
+
+        {/* App info */}
+        <Section title="Información de la aplicación">
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between"><span className="text-gray-400">Versión</span><span className="text-gray-200">{appInfo?.appVersion || '—'}</span></div>
+            <div className="flex justify-between"><span className="text-gray-400">Dispositivo</span><span className="text-gray-200">{appInfo?.deviceName || '—'}</span></div>
+            <div className="flex justify-between"><span className="text-gray-400">Sistema</span><span className="text-gray-200">{appInfo?.os || '—'}</span></div>
+          </div>
+        </Section>
+
+      </div>
+
+      {showWizard && (
+        <OnboardingWizard
+          onDone={() => {
+            setShowWizard(false);
+            setWaStatus('connected');
+            window.api?.settings?.getAll?.().then(s => {
+              if (s?.wa_api_url) setApiUrl(s.wa_api_url);
+              if (s?.wa_business_account_id) setBusinessAccountId(s.wa_business_account_id);
+            }).catch(() => {});
+            loadProfile();
+            window.api?.whatsapp?.getPhoneNumberDetails?.().then(r => { if (r?.ok !== false) setPhoneDetails(r); }).catch(() => {});
+          }}
+          onSkip={() => setShowWizard(false)}
+        />
+      )}
     </div>
   );
 }

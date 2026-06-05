@@ -196,6 +196,37 @@ class KapsoAdapter extends IWhatsAppProvider {
     return this._post(`/${this._phoneNumberId}/whatsapp_business_profile`, data);
   }
 
+  // ── Display name (Platform v1) ────────────────────────────────────────────
+
+  /** Latest display-name change requests for this number (most recent first) */
+  async getDisplayNameRequests() {
+    if (!this._apiKey || !this._phoneNumberId) return { ok: false, error: 'Not connected' };
+    try {
+      const res = await fetch(`${KAPSO_PLATFORM}/whatsapp/phone_numbers/${this._phoneNumberId}/display_name_requests?per_page=5`, {
+        headers: { 'X-API-Key': this._apiKey },
+      });
+      if (!res.ok) { const t = await res.text().catch(() => ''); return { ok: false, error: `Kapso ${res.status}: ${t}` }; }
+      const j = await res.json().catch(() => ({}));
+      return { ok: true, requests: j?.data ?? [] };
+    } catch (err) { return { ok: false, error: err.message }; }
+  }
+
+  /** Submit a new display name to Meta for review (24-48h; some approve instantly) */
+  async submitDisplayName(newName) {
+    if (!this._apiKey || !this._phoneNumberId) return { ok: false, error: 'Not connected' };
+    if (!newName?.trim()) return { ok: false, error: 'Nombre vacío' };
+    try {
+      const res = await fetch(`${KAPSO_PLATFORM}/whatsapp/phone_numbers/${this._phoneNumberId}/display_name_requests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': this._apiKey },
+        body: JSON.stringify({ display_name_request: { new_display_name: newName.trim() } }),
+      });
+      if (!res.ok) { const t = await res.text().catch(() => ''); return { ok: false, error: `Kapso ${res.status}: ${t}` }; }
+      const j = await res.json().catch(() => ({}));
+      return { ok: true, request: j?.data ?? null };
+    } catch (err) { return { ok: false, error: err.message }; }
+  }
+
   // ── Phone Number ──────────────────────────────────────────────────────────
 
   /** GET /platform/v1/whatsapp/phone_numbers/{id} — richer data than meta proxy */
@@ -271,6 +302,48 @@ class KapsoAdapter extends IWhatsAppProvider {
       // Only production numbers — skip sandbox
       const production = all.filter(n => n.kind !== 'sandbox');
       return { ok: true, phoneNumbers: production };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  /**
+   * Create a hosted WhatsApp onboarding (setup) link using only the API key.
+   * Lists the account's customer (1 per free account), creating one if none exists,
+   * then generates a Meta embedded-signup setup link. Returns { ok, url }.
+   */
+  static async createOnboardingLink(apiKey, { language = 'es', theme } = {}) {
+    if (!apiKey) return { ok: false, error: 'API Key requerida' };
+    const headers = { 'Content-Type': 'application/json', 'X-API-Key': apiKey };
+    try {
+      // 1. Find the customer (most recent first); create one if the account has none.
+      let customerId = null;
+      const listRes = await fetch(`${KAPSO_PLATFORM}/customers?per_page=1`, { headers });
+      if (listRes.ok) {
+        const j = await listRes.json().catch(() => ({}));
+        customerId = j?.data?.[0]?.id ?? null;
+      }
+      if (!customerId) {
+        const createRes = await fetch(`${KAPSO_PLATFORM}/customers`, {
+          method: 'POST', headers,
+          body: JSON.stringify({ customer: { name: 'Mi negocio' } }),
+        });
+        if (!createRes.ok) { const t = await createRes.text().catch(() => ''); return { ok: false, error: `Kapso ${createRes.status}: ${t}` }; }
+        const cj = await createRes.json().catch(() => ({}));
+        customerId = cj?.data?.id ?? null;
+      }
+      if (!customerId) return { ok: false, error: 'No se pudo obtener el customer de Kapso' };
+
+      // 2. Create the setup link for that customer.
+      const body = { setup_link: { language, ...(theme ? { theme_config: theme } : {}) } };
+      const res = await fetch(`${KAPSO_PLATFORM}/customers/${customerId}/setup_links`, {
+        method: 'POST', headers, body: JSON.stringify(body),
+      });
+      if (!res.ok) { const t = await res.text().catch(() => ''); return { ok: false, error: `Kapso ${res.status}: ${t}` }; }
+      const j = await res.json().catch(() => ({}));
+      const url = j?.data?.url;
+      if (!url) return { ok: false, error: 'Kapso no devolvió la URL del setup link' };
+      return { ok: true, url, customerId, setupLinkId: j?.data?.id };
     } catch (err) {
       return { ok: false, error: err.message };
     }

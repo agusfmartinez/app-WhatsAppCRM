@@ -80,6 +80,7 @@ contextBridge.exposeInMainWorld('api', {
     disconnect: () => ipcRenderer.invoke('crm:whatsapp:disconnect'),
     listProviders: () => ipcRenderer.invoke('crm:whatsapp:providers'),
     detectNumbers: (apiKey) => ipcRenderer.invoke('crm:whatsapp:detect-numbers', apiKey),
+    createSetupLink: (apiKey, opts) => ipcRenderer.invoke('crm:whatsapp:create-setup-link', apiKey, opts),
 
     // Messages
     listMessages: (opts) => ipcRenderer.invoke('crm:whatsapp:list-messages', opts),
@@ -101,6 +102,8 @@ contextBridge.exposeInMainWorld('api', {
     // Business Profile
     getBusinessProfile: () => ipcRenderer.invoke('crm:whatsapp:business-profile'),
     updateBusinessProfile: (data) => ipcRenderer.invoke('crm:whatsapp:update-business-profile', data),
+    getDisplayNameRequests: () => ipcRenderer.invoke('crm:whatsapp:display-name-requests'),
+    submitDisplayName: (name) => ipcRenderer.invoke('crm:whatsapp:submit-display-name', name),
 
     // Phone Number
     getPhoneNumberDetails: () => ipcRenderer.invoke('crm:whatsapp:phone-details'),

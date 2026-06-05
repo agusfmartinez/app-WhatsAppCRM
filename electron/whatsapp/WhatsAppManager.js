@@ -70,6 +70,8 @@ function createWhatsAppManager(onEvent) {
     // Business Profile
     getBusinessProfile: () => _delegate('getBusinessProfile'),
     updateBusinessProfile: (data) => _delegate('updateBusinessProfile', data),
+    getDisplayNameRequests: () => _delegate('getDisplayNameRequests'),
+    submitDisplayName: (name) => _delegate('submitDisplayName', name),
 
     // Phone Number
     getPhoneNumberDetails: () => _delegate('getPhoneNumberDetails'),

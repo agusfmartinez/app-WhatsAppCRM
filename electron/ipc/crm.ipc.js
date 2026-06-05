@@ -259,6 +259,10 @@ function initCrm(ipcMain, waManager) {
     const { KapsoAdapter } = require('../whatsapp/providers/KapsoAdapter');
     return KapsoAdapter.fetchPhoneNumbers(apiKey);
   });
+  ipcMain.handle('crm:whatsapp:create-setup-link', async (_e, apiKey, opts) => {
+    const { KapsoAdapter } = require('../whatsapp/providers/KapsoAdapter');
+    return KapsoAdapter.createOnboardingLink(apiKey, opts);
+  });
 
   // ── WhatsApp: messages ────────────────────────────────────────────────────
   ipcMain.handle('crm:whatsapp:list-messages', async (_e, opts) => waManager.listMessages(opts));
@@ -280,6 +284,8 @@ function initCrm(ipcMain, waManager) {
   // ── WhatsApp: business profile ────────────────────────────────────────────
   ipcMain.handle('crm:whatsapp:business-profile', async () => waManager.getBusinessProfile());
   ipcMain.handle('crm:whatsapp:update-business-profile', async (_e, data) => waManager.updateBusinessProfile(data));
+  ipcMain.handle('crm:whatsapp:display-name-requests', async () => waManager.getDisplayNameRequests());
+  ipcMain.handle('crm:whatsapp:submit-display-name', async (_e, name) => waManager.submitDisplayName(name));
 
   // ── WhatsApp: phone number ────────────────────────────────────────────────
   ipcMain.handle('crm:whatsapp:phone-details', async () => waManager.getPhoneNumberDetails());

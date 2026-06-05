@@ -46,9 +46,10 @@
 - ✅ Inbox: polling de conversaciones y mensajes reales desde Kapso Platform v1
 - ✅ Inbox: envío manual + preview, no-leídos, guard ventana 24hs, separadores de fecha
 - ✅ Settings: info real del número conectado (status, display_phone_number, quality_rating, verified_name)
+- ✅ Onboarding wizard: 3 pasos (crear cuenta → pegar API key → conectar número via Setup Link hosted + auto-detección por polling)
 
 **Pendiente:**
-- 🔜 Onboarding wizard: guía para que el cliente configure Kapso (3 pasos)
+- (Fase 2 completa — ver Fase 3)
 
 **Arquitectura de datos:**
 ```

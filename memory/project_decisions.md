@@ -15,6 +15,18 @@ metadata:
 **Why:** El developer vende la app como producto, no gestiona credenciales de clientes.
 **How to apply:** Cualquier feature nueva debe poder usarse sin acceder al panel de Kapso.
 
+### Por qué NO multi-tenant en 1 cuenta (verificado jun 2026 con chat IA de Kapso)
+
+- Free = 1 número conectado + 2000 msgs/mes, billing **por proyecto**.
+- PERO el "1 número gratis" es beneficio **una sola vez en la vida de la cuenta** (primer proyecto default). Crear N proyectos NO da N números gratis.
+- Desconectar/borrar el número NO reinicia el claim gratis; reemplazo puede requerir depósito.
+- Conclusión: multi-tenant gratis (vos hosteás muchos clientes en tu cuenta) **no es viable**. Cada cliente necesita su propia cuenta Kapso.
+- Multi-tenant real (Inbox Embeds scopeado por customer, muchos números) recién sirve en Pro (3 núm) / Platform (50 núm) = pago.
+- Onboarding implementado: **wizard 3 pasos** (crear cuenta → pegar API key → conectar número via **Setup Link**). Reordenado: la key va ANTES del número (chicken-egg: primera key es manual).
+- **Setup Links** (NO scraping): con la API key la app hace `GET /platform/v1/customers` (1 customer por cuenta free; crea uno si no existe) → `POST /customers/{id}/setup_links {language:'es', theme_config}` → abre la URL hosted → el cliente hace el embedded signup de Meta ahí → la app pollea `detectNumbers` cada 5s hasta detectar el número → conecta + guarda. Ver [[kapso-inbox-quirks]] (todo meta-proxy envuelve en `data`; platform v1 igual).
+- Adapter: `KapsoAdapter.createOnboardingLink(apiKey)` (static). IPC `crm:whatsapp:create-setup-link`. Wizard en `src/components/OnboardingWizard.jsx`, gateado desde Layout (sin api key + no conectado → se muestra).
+- **PENDIENTE VERIFICAR EN VIVO:** shape de create-customer (`{customer:{name}}`) y de setup_links response (`data.url`) son best-guess del openapi — no testeado contra la API real todavía.
+
 ## Cobertura API Kapso planeada
 
 - ✅ Send template message (campaigns)
@@ -25,6 +37,14 @@ metadata:
 - 🔜 Delete template
 - 🔜 Get business profile
 - 🔜 Media upload/download (fase 3)
+
+## Sync multi-PC / team (decidido jun 2026)
+
+- DB local (sql.js) es **por PC** → tags, campañas, notas y campos manuales NO sincronizan entre máquinas.
+- Lo que SÍ converge: conversaciones, mensajes, contactos WA y templates (viven en Kapso, ambas PCs pollean).
+- **Decisión:** mantener local-first por ahora (single-user/1 PC). NO migrar a Supabase todavía.
+- **Roadmap futuro:** planes diferenciados — básico (local, esta versión) vs pro (multi-PC, CRM data en Supabase opción 3). Posibles versiones alternativas de la app. Billing Kapso va aparte del plan de la app.
+- Si se hace multi-PC: mover contacts/tags/campaigns a Supabase (ya en stack), replantear licencias (por usuario vs por equipo).
 
 ## Decisiones técnicas clave
 
