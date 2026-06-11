@@ -70,9 +70,11 @@ Local DB (fuente de verdad) ←→ CRUD directo  ←→ Contactos, Campañas
 1. **Tags CRUD** — gestión de etiquetas desde UI (página Settings o panel Contactos)
 2. **Import CSV** — parsear CSV → normalizar teléfonos → batch insert contactos
 3. **Export CSV** — exportar tabla contacts
-4. **Campañas: progreso en tiempo real** — push de estado por contacto durante envío
-5. **Campañas: variables por contacto** — mapear `{{1}}` a campo del contacto (nombre, empresa, etc.)
+4. ✅ **Campañas: progreso en tiempo real** — via Kapso Broadcasts (poll de stats, snapshot local, auto-freeze)
+5. ✅ **Campañas: variables por contacto** — mapeo `{{n}}` a valor fijo o campo del contacto
 6. **Inbox en tiempo real** — polling activo, notificación de mensajes nuevos
+
+> Campañas migradas a **Kapso Broadcasts** (server-side): create → add recipients → send/schedule → poll. Híbrido: métricas snapshot a DB local, freeze a los 3 días. El loop `sendTemplate` quedó solo para "Probar template".
 
 ---
 

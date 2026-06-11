@@ -73,6 +73,16 @@ function createWhatsAppManager(onEvent) {
     getDisplayNameRequests: () => _delegate('getDisplayNameRequests'),
     submitDisplayName: (name) => _delegate('submitDisplayName', name),
 
+    // Broadcasts
+    createBroadcast: (opts) => _delegate('createBroadcast', opts),
+    addBroadcastRecipients: (id, recipients) => _delegate('addBroadcastRecipients', id, recipients),
+    sendBroadcast: (id) => _delegate('sendBroadcast', id),
+    scheduleBroadcast: (id, scheduledAt) => _delegate('scheduleBroadcast', id, scheduledAt),
+    cancelBroadcast: (id) => _delegate('cancelBroadcast', id),
+    getBroadcast: (id) => _delegate('getBroadcast', id),
+    listBroadcasts: (opts) => _delegate('listBroadcasts', opts),
+    listBroadcastRecipients: (id, opts) => _delegate('listBroadcastRecipients', id, opts),
+
     // Phone Number
     getPhoneNumberDetails: () => _delegate('getPhoneNumberDetails'),
 

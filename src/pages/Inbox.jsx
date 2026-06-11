@@ -401,13 +401,6 @@ export default function Inbox() {
                 </div>
               );
             })}
-            {!loadingMsgs && active && !windowOpen && (
-              <div className="flex justify-center pt-2">
-                <p className="max-w-sm text-center text-[11px] text-amber-400/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
-                  Ventana de 24hs cerrada — no se pueden enviar mensajes libres. Usá una plantilla aprobada desde Campañas para reabrir la conversación.
-                </p>
-              </div>
-            )}
             <div ref={bottomRef} />
           </div>
 

@@ -148,86 +148,264 @@ function initCrm(ipcMain, waManager) {
     const campaign = first(`SELECT * FROM campaigns WHERE id = ?`, [id]);
     if (!campaign) return null;
     const contacts = all(`
-      SELECT cc.id, cc.status, cc.sent_at, cc.error, c.name, c.phone
+      SELECT cc.id, cc.status, cc.sent_at, cc.error, cc.params,
+             cc.delivered_at, cc.read_at, cc.responded_at, cc.failed_at, cc.error_message,
+             c.name, c.phone
       FROM campaign_contacts cc JOIN contacts c ON c.id = cc.contact_id
       WHERE cc.campaign_id = ?
     `, [id]);
     return { ...campaign, contacts };
   });
 
-  ipcMain.handle('crm:campaigns:create', (_e, { name, templateName, templateLanguage = 'es', templateVariables = [], contactIds = [] }) => {
-    const variablesJson = JSON.stringify(templateVariables);
-    const { lastInsertRowid: campaignId } = run(
-      `INSERT INTO campaigns (name, message_template, template_name, template_language, template_variables, total_contacts) VALUES (?, ?, ?, ?, ?, ?)`,
-      [name, templateName, templateName, templateLanguage, variablesJson, contactIds.length]
-    );
-    contactIds.forEach(cid => runBatch(
-      `INSERT INTO campaign_contacts (campaign_id, contact_id) VALUES (?, ?)`, [campaignId, cid]
-    ));
-    if (contactIds.length) saveDb();
-    return { ok: true, id: campaignId };
-  });
+  // Upsert a contact by phone (digits only), return its id. Used by CSV import.
+  function upsertContactByPhone(phone, name) {
+    const norm = String(phone || '').replace(/[^0-9]/g, '');
+    if (!norm) return null;
+    const existing = first(`SELECT id FROM contacts WHERE phone = ?`, [norm]);
+    if (existing) return existing.id;
+    const { lastInsertRowid } = run(`INSERT INTO contacts (name, phone) VALUES (?, ?)`, [name?.trim() || norm, norm]);
+    return lastInsertRowid;
+  }
 
-  ipcMain.handle('crm:campaigns:delete', (_e, id) => {
-    run(`DELETE FROM campaigns WHERE id = ?`, [id]);
-    return { ok: true };
-  });
+  // Create a campaign as a local draft. Recipients come from either:
+  //  - contactIds[] (segment from CRM; params resolved at send via variableMap), or
+  //  - recipients[] (CSV: { phone, name, params[] } → upsert contacts + per-recipient params).
+  ipcMain.handle('crm:campaigns:create', (_e, { name, templateId, templateName, templateLanguage = 'es', variableMap = [], contactIds = [], recipients = [] }) => {
+    const mapJson = JSON.stringify(variableMap);
 
-  ipcMain.handle('crm:campaigns:send', async (_e, id) => {
-    const campaign = first(`SELECT * FROM campaigns WHERE id = ?`, [id]);
-    if (!campaign) return { ok: false, error: 'Campaign not found' };
-    if (campaign.status === 'sent') return { ok: false, error: 'Already sent' };
-
-    const contacts = all(`
-      SELECT cc.id AS cc_id, c.phone
-      FROM campaign_contacts cc JOIN contacts c ON c.id = cc.contact_id
-      WHERE cc.campaign_id = ? AND cc.status = 'pending'
-    `, [id]);
-
-    runBatch(`UPDATE campaigns SET status='sending' WHERE id=?`, [id]);
-    saveDb();
-
-    // Delay between messages — read from settings (default 1000ms)
-    const delayRow = first(`SELECT value FROM settings WHERE key='campaign_delay'`);
-    const delayMs = Math.max(0, Number(delayRow?.value) || 1000);
-
-    const templateName = campaign.template_name || campaign.message_template;
-    const templateLanguage = campaign.template_language || 'es';
-
-    // Build body components from stored variables
-    let variables = [];
-    try { variables = JSON.parse(campaign.template_variables || '[]'); } catch {}
-    const components = variables.length
-      ? [{ type: 'body', parameters: variables.map(v => ({ type: 'text', text: String(v) })) }]
-      : [];
-
-    let sent = 0;
-    let errors = 0;
-    for (let i = 0; i < contacts.length; i++) {
-      const row = contacts[i];
-      try {
-        const res = await waManager.sendTemplate(row.phone, templateName, templateLanguage, components);
-        if (res.ok) {
-          runBatch(`UPDATE campaign_contacts SET status='sent', sent_at=datetime('now') WHERE id=?`, [row.cc_id]);
-          sent++;
-        } else {
-          runBatch(`UPDATE campaign_contacts SET status='error', error=? WHERE id=?`, [res.error ?? 'Error desconocido', row.cc_id]);
-          errors++;
-        }
-      } catch (err) {
-        runBatch(`UPDATE campaign_contacts SET status='error', error=? WHERE id=?`, [err.message, row.cc_id]);
-        errors++;
+    // Build the recipient rows ({ contactId, params }), de-duplicated by contact.
+    const rows = [];
+    const seen = new Set();
+    if (recipients.length) {
+      for (const r of recipients) {
+        const cid = upsertContactByPhone(r.phone, r.name);
+        if (!cid || seen.has(cid)) continue;
+        seen.add(cid);
+        rows.push({ contactId: cid, params: Array.isArray(r.params) ? JSON.stringify(r.params) : null });
       }
-      // Delay between messages (skip after last one)
-      if (delayMs > 0 && i < contacts.length - 1) {
-        await new Promise(r => setTimeout(r, delayMs));
+    } else {
+      for (const cid of contactIds) {
+        if (seen.has(cid)) continue;
+        seen.add(cid);
+        rows.push({ contactId: cid, params: null });
       }
     }
 
-    runBatch(`UPDATE campaigns SET status='sent', sent_at=datetime('now'), sent_count=?, error_count=? WHERE id=?`, [sent, errors, id]);
+    const { lastInsertRowid: campaignId } = run(
+      `INSERT INTO campaigns (name, message_template, template_id, template_name, template_language, template_variables, total_contacts) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [name, templateName, templateId ? String(templateId) : null, templateName, templateLanguage, mapJson, rows.length]
+    );
+    rows.forEach(row => runBatch(
+      `INSERT INTO campaign_contacts (campaign_id, contact_id, params) VALUES (?, ?, ?)`, [campaignId, row.contactId, row.params]
+    ));
     saveDb();
+    return { ok: true, id: campaignId, total: rows.length };
+  });
 
-    return { ok: true, sent, errors };
+  ipcMain.handle('crm:campaigns:delete', (_e, id) => {
+    // If it maps to a Kapso broadcast, remember it as dismissed so import won't re-add it
+    // (Kapso has no delete-broadcast endpoint, the broadcast persists there).
+    const c = first(`SELECT kapso_broadcast_id FROM campaigns WHERE id = ?`, [id]);
+    if (c?.kapso_broadcast_id) {
+      let list = [];
+      try { list = JSON.parse(first(`SELECT value FROM settings WHERE key='dismissed_broadcasts'`)?.value || '[]'); } catch {}
+      if (!list.includes(c.kapso_broadcast_id)) list.push(c.kapso_broadcast_id);
+      run(`INSERT OR REPLACE INTO settings (key, value) VALUES ('dismissed_broadcasts', ?)`, [JSON.stringify(list)]);
+    }
+    run(`DELETE FROM campaigns WHERE id = ?`, [id]);
+    saveDb();
+    return { ok: true };
+  });
+
+  // Resolve a contact's variables from the campaign's variableMap into Meta body parameters
+  function buildComponents(variableMap, contact) {
+    if (!variableMap?.length) return [];
+    const parameters = variableMap.map(m => {
+      const text = m?.source === 'field' ? (contact[m.value] ?? '') : (m?.value ?? '');
+      return { type: 'text', text: String(text || ' ') };
+    });
+    return [{ type: 'body', parameters }];
+  }
+
+  // Snapshot a Kapso broadcast payload into the local campaign row.
+  const FREEZE_DAYS = 3;
+  function applyBroadcastStats(id, b) {
+    const completed = b.status === 'completed' || b.status === 'failed';
+    // Auto-freeze once completed for more than FREEZE_DAYS (read/responses stop trickling)
+    let frozen = 0;
+    if (completed && b.completed_at) {
+      const ageDays = (Date.now() - new Date(b.completed_at).getTime()) / 86400000;
+      if (ageDays >= FREEZE_DAYS) frozen = 1;
+    }
+    runBatch(`UPDATE campaigns SET
+        status=?, total_recipients=?, sent_count=?, error_count=?, delivered_count=?, read_count=?,
+        responded_count=?, pending_count=?, response_rate=?, started_at=?, completed_at=?,
+        sent_at=COALESCE(completed_at, sent_at), stats_frozen=?, stats_updated_at=datetime('now')
+      WHERE id=?`,
+      [b.status, b.total_recipients ?? 0, b.sent_count ?? 0, b.failed_count ?? 0, b.delivered_count ?? 0,
+       b.read_count ?? 0, b.responded_count ?? 0, b.pending_count ?? 0, b.response_rate ?? 0,
+       b.started_at ?? null, b.completed_at ?? null, frozen, id]);
+  }
+
+  // Create + populate + send (or schedule) a Kapso broadcast for this campaign.
+  ipcMain.handle('crm:campaigns:send', async (_e, id, { scheduledAt = null } = {}) => {
+    const campaign = first(`SELECT * FROM campaigns WHERE id = ?`, [id]);
+    if (!campaign) return { ok: false, error: 'Campaña no encontrada' };
+    if (campaign.status === 'sending' || campaign.status === 'completed') return { ok: false, error: 'La campaña ya fue enviada' };
+    if (!campaign.template_id) return { ok: false, error: 'La campaña no tiene un template asociado' };
+
+    const contacts = all(`
+      SELECT cc.params, c.name, c.phone, c.email, c.company
+      FROM campaign_contacts cc JOIN contacts c ON c.id = cc.contact_id
+      WHERE cc.campaign_id = ?
+    `, [id]);
+    if (!contacts.length) return { ok: false, error: 'La campaña no tiene contactos' };
+
+    let variableMap = [];
+    try { variableMap = JSON.parse(campaign.template_variables || '[]'); } catch {}
+
+    // Per-recipient body components: stored CSV params take precedence over field mapping.
+    const componentsFor = (c) => {
+      if (c.params) {
+        let arr = null;
+        try { arr = JSON.parse(c.params); } catch {}
+        if (Array.isArray(arr) && arr.length) {
+          return [{ type: 'body', parameters: arr.map(p => ({ type: 'text', text: String(p || ' ') })) }];
+        }
+      }
+      return buildComponents(variableMap, c);
+    };
+
+    // 1. Create draft broadcast
+    const created = await waManager.createBroadcast({ name: campaign.name, templateId: campaign.template_id });
+    if (!created?.ok) return { ok: false, error: created?.error || 'No se pudo crear el broadcast' };
+    const broadcastId = created.data?.id;
+    if (!broadcastId) return { ok: false, error: 'Kapso no devolvió el id del broadcast' };
+
+    // 2. Add recipients in batches of 1000. Kapso returns { added, duplicates, errors[] }
+    //    per batch (HTTP 201 even with per-recipient validation failures).
+    let added = 0, duplicates = 0;
+    const warnings = [];
+    for (let i = 0; i < contacts.length; i += 1000) {
+      const batch = contacts.slice(i, i + 1000).map(c => ({
+        phone_number: '+' + String(c.phone).replace(/[^0-9]/g, ''),
+        components: componentsFor(c),
+      }));
+      const addRes = await waManager.addBroadcastRecipients(broadcastId, batch);
+      if (!addRes?.ok) return { ok: false, error: addRes?.error || 'Error agregando destinatarios' };
+      added += addRes.data?.added ?? 0;
+      duplicates += addRes.data?.duplicates ?? 0;
+      if (Array.isArray(addRes.data?.errors)) warnings.push(...addRes.data.errors);
+    }
+    if (added === 0) {
+      return { ok: false, error: `Ningún destinatario válido. ${warnings.slice(0, 3).join(' · ') || 'Revisá teléfonos y parámetros.'}` };
+    }
+
+    // 3. Send now or schedule
+    const action = scheduledAt
+      ? await waManager.scheduleBroadcast(broadcastId, scheduledAt)
+      : await waManager.sendBroadcast(broadcastId);
+    if (!action?.ok) return { ok: false, error: action?.error || 'Error al enviar el broadcast' };
+
+    runBatch(`UPDATE campaigns SET kapso_broadcast_id=?, status=?, scheduled_at=?, total_recipients=?, started_at=datetime('now') WHERE id=?`,
+      [broadcastId, scheduledAt ? 'scheduled' : 'sending', scheduledAt, added, id]);
+    saveDb();
+    return { ok: true, broadcastId, added, duplicates, warnings };
+  });
+
+  // Poll Kapso for live stats and snapshot them locally (skips frozen campaigns).
+  ipcMain.handle('crm:campaigns:refresh-stats', async (_e, id) => {
+    const campaign = first(`SELECT * FROM campaigns WHERE id = ?`, [id]);
+    if (!campaign) return { ok: false, error: 'Campaña no encontrada' };
+    if (campaign.stats_frozen || !campaign.kapso_broadcast_id) {
+      return { ok: true, campaign }; // nothing to refresh
+    }
+    const res = await waManager.getBroadcast(campaign.kapso_broadcast_id);
+    if (!res?.ok) return { ok: false, error: res?.error || 'Error consultando el broadcast' };
+    applyBroadcastStats(id, res.data || {});
+    saveDb();
+    return { ok: true, campaign: first(`SELECT * FROM campaigns WHERE id = ?`, [id]) };
+  });
+
+  // Snapshot a broadcast's recipients into local contacts + campaign_contacts (once).
+  async function snapshotRecipients(campaignId, broadcastId) {
+    if (first(`SELECT 1 FROM campaign_contacts WHERE campaign_id = ? LIMIT 1`, [campaignId])) return;
+    const res = await waManager.listBroadcastRecipients(broadcastId, { perPage: 500 });
+    if (!res?.ok) return;
+    const list = Array.isArray(res.data) ? res.data : (res.data?.data || []);
+    for (const r of list) {
+      const phone = String(r.phone_number || '').replace(/[^0-9]/g, '');
+      if (!phone) continue;
+      const cid = upsertContactByPhone(phone, null);
+      if (!cid) continue;
+      const body = (r.template_components || []).find(c => String(c.type || '').toLowerCase() === 'body');
+      const params = (body?.parameters || []).map(p => p.text ?? '');
+      runBatch(
+        `INSERT INTO campaign_contacts (campaign_id, contact_id, status, params, sent_at, delivered_at, read_at, responded_at, failed_at, error_message)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [campaignId, cid, r.status || 'pending', JSON.stringify(params), r.sent_at || null, r.delivered_at || null,
+         r.read_at || null, r.responded_at || null, r.failed_at || null, r.error_message || null]
+      );
+    }
+  }
+
+  // Import broadcasts created directly in Kapso into the local campaigns table.
+  ipcMain.handle('crm:campaigns:import-broadcasts', async () => {
+    const res = await waManager.listBroadcasts({ perPage: 100 });
+    if (!res?.ok) return { ok: false, error: res?.error || 'Error listando broadcasts' };
+    const list = Array.isArray(res.data) ? res.data : (res.data?.data || []);
+    let dismissed = [];
+    try { dismissed = JSON.parse(first(`SELECT value FROM settings WHERE key='dismissed_broadcasts'`)?.value || '[]'); } catch {}
+    let imported = 0, updated = 0;
+    for (const b of list) {
+      if (!b?.id || dismissed.includes(b.id)) continue;
+      const tplName = b.whatsapp_template?.name || '';
+      const tplId = b.whatsapp_template?.meta_template_id || b.whatsapp_template?.id || null;
+      const existing = first(`SELECT id, origin FROM campaigns WHERE kapso_broadcast_id = ?`, [b.id]);
+      let campaignId;
+      if (existing) {
+        campaignId = existing.id;
+        applyBroadcastStats(campaignId, b);
+        // Backfill origin for imports that predate the origin column (no local recipients = imported)
+        const hasLocal = first(`SELECT 1 FROM campaign_contacts WHERE campaign_id = ? LIMIT 1`, [campaignId]);
+        if (!hasLocal) runBatch(`UPDATE campaigns SET origin='kapso' WHERE id = ?`, [campaignId]);
+        updated++;
+      } else {
+        const ins = run(
+          `INSERT INTO campaigns (name, message_template, template_id, template_name, kapso_broadcast_id, status, origin, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'kapso', COALESCE(?, datetime('now')))`,
+          [b.name || 'Broadcast', tplName, tplId ? String(tplId) : null, tplName, b.id, b.status || 'draft', b.created_at || null]
+        );
+        campaignId = ins.lastInsertRowid;
+        applyBroadcastStats(campaignId, b);
+        imported++;
+      }
+      // Pull recipients into the local CRM only once the broadcast is final
+      // (avoids snapshotting stale 'pending' rows). no-ops if already snapshotted.
+      if (b.status === 'completed' || b.status === 'failed') await snapshotRecipients(campaignId, b.id);
+    }
+    saveDb();
+    return { ok: true, imported, updated };
+  });
+
+  // Per-recipient delivery status for a campaign's broadcast (live from Kapso).
+  ipcMain.handle('crm:campaigns:recipients', async (_e, id) => {
+    const campaign = first(`SELECT kapso_broadcast_id FROM campaigns WHERE id = ?`, [id]);
+    if (!campaign?.kapso_broadcast_id) return { ok: false, error: 'Sin broadcast asociado' };
+    const res = await waManager.listBroadcastRecipients(campaign.kapso_broadcast_id, { perPage: 500 });
+    if (!res?.ok) return res;
+    return { ok: true, recipients: Array.isArray(res.data) ? res.data : (res.data?.data || []) };
+  });
+
+  // Cancel a scheduled broadcast → back to draft locally.
+  ipcMain.handle('crm:campaigns:cancel', async (_e, id) => {
+    const campaign = first(`SELECT * FROM campaigns WHERE id = ?`, [id]);
+    if (!campaign?.kapso_broadcast_id) return { ok: false, error: 'Sin broadcast asociado' };
+    const res = await waManager.cancelBroadcast(campaign.kapso_broadcast_id);
+    if (!res?.ok) return { ok: false, error: res?.error || 'No se pudo cancelar' };
+    runBatch(`UPDATE campaigns SET status='draft', scheduled_at=NULL WHERE id=?`, [id]);
+    saveDb();
+    return { ok: true };
   });
 
   // ─── Settings ─────────────────────────────────────────────────────────────

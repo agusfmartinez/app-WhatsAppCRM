@@ -18,6 +18,7 @@ import Layout from './components/Layout.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Contacts from './pages/Contacts.jsx';
 import Campaigns from './pages/Campaigns.jsx';
+import CampaignDetail from './pages/CampaignDetail.jsx';
 import Inbox from './pages/Inbox.jsx';
 import Reports from './pages/Reports.jsx';
 import Templates from './pages/Templates.jsx';
@@ -224,6 +225,7 @@ const CRM_ROUTES = (
     <Route path="contacts" element={<Contacts />} />
     <Route path="inbox" element={<Inbox />} />
     <Route path="campaigns" element={<Campaigns />} />
+    <Route path="campaigns/:id" element={<CampaignDetail />} />
     <Route path="reports" element={<Reports />} />
     <Route path="templates" element={<Templates />} />
     <Route path="settings" element={<Settings />} />

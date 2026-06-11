@@ -178,20 +178,7 @@ export default function Contacts() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Auto-sync from Kapso on first mount (background, non-blocking)
-  useEffect(() => {
-    const autoSync = async () => {
-      const status = await window.api?.whatsapp?.getStatus?.().catch(() => null);
-      if (status?.status !== 'connected') return;
-      const res = await window.api?.syncKapsoContacts?.().catch(() => null);
-      if (res?.ok && (res.created > 0 || res.updated > 0)) {
-        setSyncResult(res);
-        load(); // reload list with new/updated contacts
-      }
-    };
-    autoSync();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // DB-first: no auto-sync on mount. Use the manual "Sincronizar" button to pull from Kapso.
 
   const handleSave = async (form) => {
     if (modal === 'new') {
@@ -246,7 +233,7 @@ export default function Contacts() {
             <svg className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
             </svg>
-            {syncing ? 'Sincronizando...' : 'Sync Kapso'}
+            {syncing ? 'Sincronizando...' : ''}
           </button>
           <button
             onClick={() => setModal('new')}

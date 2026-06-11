@@ -46,6 +46,16 @@ metadata:
 - **Roadmap futuro:** planes diferenciados — básico (local, esta versión) vs pro (multi-PC, CRM data en Supabase opción 3). Posibles versiones alternativas de la app. Billing Kapso va aparte del plan de la app.
 - Si se hace multi-PC: mover contacts/tags/campaigns a Supabase (ya en stack), replantear licencias (por usuario vs por equipo).
 
+## Campañas → Kapso Broadcasts (decidido jun 2026)
+
+- Reemplazar el loop client-side `sendTemplate` por **Broadcasts API** (Platform v1, `/whatsapp/broadcasts`). Server-side: Kapso maneja throughput, retries, scheduling. App no necesita quedar abierta.
+- **Híbrido:** tabla local `campaigns` guarda metadata + `kapso_broadcast_id` + todas las métricas. Se poll-ea `GET broadcast` solo mientras envía; al terminar se snapshot-ea a la tabla. **Freeze opción 3:** refresh manual disponible + auto-freeze a los X días (delivered/read/responded siguen cambiando post-`completed_at`, no congelar de una).
+- **Clave:** `whatsapp_template_id` del create acepta el **Meta template ID directo** (el que ya tenemos en `t.id` de getTemplates). El UUID es legacy. NO hay que mapear.
+- Flujo: create (name, phone_number_id, whatsapp_template_id=meta_id) → add recipients (≤1000/batch, phone + components params posicional/named) → send | schedule {scheduled_at ISO} → poll GET.
+- status enum: draft, scheduled, sending, completed, failed. stats: total_recipients, sent/failed/delivered/read/pending/responded_count, response_rate, started_at, completed_at.
+- **Alpha API** — mantener detrás del adapter (un solo lugar para adaptar si rompe).
+- El loop `sendTemplate` queda solo para "Probar template" del módulo Templates.
+
 ## Decisiones técnicas clave
 
 - sql.js (WASM) no better-sqlite3 → sin prerequisitos de compilación en PC del cliente

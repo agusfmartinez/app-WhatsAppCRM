@@ -1,7 +1,23 @@
 const { IWhatsAppProvider } = require('../IWhatsAppProvider');
+const { createLogger } = require('../../logger');
 
 const KAPSO_BASE = 'https://api.kapso.ai/meta/whatsapp/v24.0';
 const KAPSO_PLATFORM = 'https://api.kapso.ai/platform/v1';
+
+// ── Kapso API trace logger (file: <userData>/logs/<user>/kapso-api.log + dev console) ──
+let _apiLog = null;
+function apiLogger() {
+  if (!_apiLog) { try { _apiLog = createLogger({ file: 'kapso-api.log', scope: 'KAPSO_API' }); } catch {} }
+  return _apiLog;
+}
+let _isDev = true;
+try { _isDev = !require('electron').app?.isPackaged; } catch {}
+function traceApi(method, url, status, ms, error) {
+  const path = String(url).replace('https://api.kapso.ai', '').split('?')[0];
+  const line = `${method} ${path} → ${status}${error ? ' ERR' : ''} (${ms}ms)`;
+  if (_isDev) console.log('[kapso-api]', line + (error ? ` ${error}` : ''));
+  try { apiLogger()?.info(line, { method, status, ms, error: error ? String(error).slice(0, 200) : undefined }); } catch {}
+}
 
 class KapsoAdapter extends IWhatsAppProvider {
   constructor() {
@@ -227,6 +243,71 @@ class KapsoAdapter extends IWhatsAppProvider {
     } catch (err) { return { ok: false, error: err.message }; }
   }
 
+  // ── Broadcasts (Platform v1, alpha) ───────────────────────────────────────
+
+  /** Internal: Platform v1 fetch with X-API-Key. Returns { ok, data } or { ok:false, error } */
+  async _platform(method, path, body) {
+    if (!this._apiKey) return { ok: false, error: 'Not connected' };
+    const url = `${KAPSO_PLATFORM}${path}`;
+    const t0 = Date.now();
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': this._apiKey },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+      traceApi(method, url, res.status, Date.now() - t0);
+      if (!res.ok) { const t = await res.text().catch(() => ''); return { ok: false, error: `Kapso ${res.status}: ${t}` }; }
+      const j = await res.json().catch(() => ({}));
+      return { ok: true, data: j?.data ?? j };
+    } catch (err) { traceApi(method, url, 'ERR', Date.now() - t0, err.message); return { ok: false, error: err.message }; }
+  }
+
+  /** Create a draft broadcast. templateId = Meta template id (numeric). */
+  async createBroadcast({ name, templateId } = {}) {
+    if (!this._phoneNumberId) return { ok: false, error: 'Sin número conectado' };
+    return this._platform('POST', '/whatsapp/broadcasts', {
+      whatsapp_broadcast: { name, phone_number_id: this._phoneNumberId, whatsapp_template_id: String(templateId) },
+    });
+  }
+
+  /** Add recipients (≤1000/call). recipients: [{ phone_number, components }] */
+  async addBroadcastRecipients(broadcastId, recipients) {
+    return this._platform('POST', `/whatsapp/broadcasts/${broadcastId}/recipients`, {
+      whatsapp_broadcast: { recipients },
+    });
+  }
+
+  async sendBroadcast(broadcastId) {
+    return this._platform('POST', `/whatsapp/broadcasts/${broadcastId}/send`);
+  }
+
+  /** scheduledAt = ISO-8601 with timezone, in the future */
+  async scheduleBroadcast(broadcastId, scheduledAt) {
+    return this._platform('POST', `/whatsapp/broadcasts/${broadcastId}/schedule`, { scheduled_at: scheduledAt });
+  }
+
+  async cancelBroadcast(broadcastId) {
+    return this._platform('POST', `/whatsapp/broadcasts/${broadcastId}/cancel`);
+  }
+
+  async getBroadcast(broadcastId) {
+    return this._platform('GET', `/whatsapp/broadcasts/${broadcastId}`);
+  }
+
+  /** List broadcasts for this number (most recent first) */
+  async listBroadcasts({ perPage = 100 } = {}) {
+    if (!this._phoneNumberId) return { ok: false, error: 'Sin número conectado' };
+    const params = new URLSearchParams({ phone_number_id: this._phoneNumberId, per_page: String(perPage) });
+    return this._platform('GET', `/whatsapp/broadcasts?${params}`);
+  }
+
+  /** Per-recipient delivery status for a broadcast */
+  async listBroadcastRecipients(broadcastId, { perPage = 500, page = 1 } = {}) {
+    const params = new URLSearchParams({ per_page: String(perPage), page: String(page) });
+    return this._platform('GET', `/whatsapp/broadcasts/${broadcastId}/recipients?${params}`);
+  }
+
   // ── Phone Number ──────────────────────────────────────────────────────────
 
   /** GET /platform/v1/whatsapp/phone_numbers/{id} — richer data than meta proxy */
@@ -352,10 +433,11 @@ class KapsoAdapter extends IWhatsAppProvider {
   // ── Internal ───────────────────────────────────────────────────────────────
 
   async _get(path) {
+    const url = `${KAPSO_BASE}${path}`;
+    const t0 = Date.now();
     try {
-      const res = await fetch(`${KAPSO_BASE}${path}`, {
-        headers: { 'X-API-Key': this._apiKey },
-      });
+      const res = await fetch(url, { headers: { 'X-API-Key': this._apiKey } });
+      traceApi('GET', url, res.status, Date.now() - t0);
       if (!res.ok) {
         const txt = await res.text().catch(() => String(res.status));
         return { ok: false, error: `Kapso ${res.status}: ${txt}` };
@@ -363,17 +445,21 @@ class KapsoAdapter extends IWhatsAppProvider {
       const data = await res.json().catch(() => ({}));
       return { ok: true, ...data };
     } catch (err) {
+      traceApi('GET', url, 'ERR', Date.now() - t0, err.message);
       return { ok: false, error: err.message };
     }
   }
 
   async _post(path, payload) {
+    const url = `${KAPSO_BASE}${path}`;
+    const t0 = Date.now();
     try {
-      const res = await fetch(`${KAPSO_BASE}${path}`, {
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-API-Key': this._apiKey },
         body: JSON.stringify(payload),
       });
+      traceApi('POST', url, res.status, Date.now() - t0);
       if (!res.ok) {
         const txt = await res.text().catch(() => String(res.status));
         return { ok: false, error: `Kapso ${res.status}: ${txt}` };
@@ -381,6 +467,7 @@ class KapsoAdapter extends IWhatsAppProvider {
       const data = await res.json().catch(() => ({}));
       return { ok: true, ...data };
     } catch (err) {
+      traceApi('POST', url, 'ERR', Date.now() - t0, err.message);
       return { ok: false, error: err.message };
     }
   }

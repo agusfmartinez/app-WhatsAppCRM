@@ -56,7 +56,11 @@ contextBridge.exposeInMainWorld('api', {
     list: () => ipcRenderer.invoke('crm:campaigns:list'),
     get: (id) => ipcRenderer.invoke('crm:campaigns:get', id),
     create: (data) => ipcRenderer.invoke('crm:campaigns:create', data),
-    send: (id) => ipcRenderer.invoke('crm:campaigns:send', id),
+    send: (id, opts) => ipcRenderer.invoke('crm:campaigns:send', id, opts),
+    refreshStats: (id) => ipcRenderer.invoke('crm:campaigns:refresh-stats', id),
+    importBroadcasts: () => ipcRenderer.invoke('crm:campaigns:import-broadcasts'),
+    recipients: (id) => ipcRenderer.invoke('crm:campaigns:recipients', id),
+    cancel: (id) => ipcRenderer.invoke('crm:campaigns:cancel', id),
     delete: (id) => ipcRenderer.invoke('crm:campaigns:delete', id),
   },
 

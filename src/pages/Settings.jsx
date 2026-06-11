@@ -213,7 +213,7 @@ export default function Settings() {
             <div className="flex items-center justify-between rounded-lg bg-green-500/5 border border-green-500/15 px-4 py-4">
               <div>
                 <p className="text-sm font-medium text-gray-100">Conectá tu número de WhatsApp</p>
-                <p className="text-xs text-gray-400 mt-0.5">Te guiamos paso a paso con Kapso.</p>
+                <p className="text-xs text-gray-400 mt-0.5">Te guiamos paso a paso.</p>
               </div>
               <button onClick={() => setShowWizard(true)} className="px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 text-xs font-medium text-white shrink-0 transition-colors">
                 Asistente de conexión
