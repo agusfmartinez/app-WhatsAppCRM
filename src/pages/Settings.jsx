@@ -82,7 +82,7 @@ export default function Settings() {
       if (st === 'connected') {
         loadProfile();
         loadDisplayRequests();
-        window.api?.whatsapp?.getPhoneNumberDetails?.().then(r => { if (r?.ok !== false) setPhoneDetails(r); }).catch(() => {});
+        window.api?.whatsapp?.getPhoneNumberDetails?.().then(r => { if (r?.ok !== false) { setPhoneDetails(r); const n = r?.verified_name || r?.display_phone_number; if (n) try { localStorage.setItem('wa_number_name', n); } catch {} } }).catch(() => {});
       }
     }).catch(() => {});
     window.api?.settings?.getAll?.().then(s => {
@@ -99,7 +99,7 @@ export default function Settings() {
         if (e.status === 'connected') {
           loadProfile();
           loadDisplayRequests();
-          window.api?.whatsapp?.getPhoneNumberDetails?.().then(r => { if (r?.ok !== false) setPhoneDetails(r); }).catch(() => {});
+          window.api?.whatsapp?.getPhoneNumberDetails?.().then(r => { if (r?.ok !== false) { setPhoneDetails(r); const n = r?.verified_name || r?.display_phone_number; if (n) try { localStorage.setItem('wa_number_name', n); } catch {} } }).catch(() => {});
         }
       }
     };
@@ -190,6 +190,7 @@ export default function Settings() {
   const handleDisconnect = async () => {
     await window.api?.whatsapp?.disconnect();
     setWaStatus('disconnected');
+    try { localStorage.removeItem('wa_number_name'); } catch {}
   };
 
   return (
@@ -385,7 +386,7 @@ export default function Settings() {
               if (s?.wa_business_account_id) setBusinessAccountId(s.wa_business_account_id);
             }).catch(() => {});
             loadProfile();
-            window.api?.whatsapp?.getPhoneNumberDetails?.().then(r => { if (r?.ok !== false) setPhoneDetails(r); }).catch(() => {});
+            window.api?.whatsapp?.getPhoneNumberDetails?.().then(r => { if (r?.ok !== false) { setPhoneDetails(r); const n = r?.verified_name || r?.display_phone_number; if (n) try { localStorage.setItem('wa_number_name', n); } catch {} } }).catch(() => {});
           }}
           onSkip={() => setShowWizard(false)}
         />

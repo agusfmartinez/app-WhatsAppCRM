@@ -72,6 +72,10 @@ metadata:
 - `crm:campaigns:get` carga TODOS los `campaign_contacts` — todavía no cableado en UI; paginar cuando se construya la vista de detalle.
 - Pendiente mejora: picker de contactos en Campañas con búsqueda server-side (hoy carga todos).
 
+## Pendiente: testear shapes en vivo
+
+- Sin verificar contra la API real (best-guess del openapi): `createSetupLink` (POST customers/{id}/setup_links + create-customer fallback), `updateBusinessProfile`, `submitDisplayName` / `getDisplayNameRequests`. Probar con cuenta real cuando se pueda y ajustar shapes si fallan.
+
 ## Pendientes de decisión
 
 - Nombre definitivo de la app (bloquea Supabase project, GitHub, installer)

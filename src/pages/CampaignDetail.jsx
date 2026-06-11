@@ -90,8 +90,15 @@ export default function CampaignDetail() {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
+    // Cache the connected number name — stable, avoids an API call per detail open
+    const cached = localStorage.getItem('wa_number_name');
+    if (cached) { setNumberName(cached); return; }
     window.api?.whatsapp?.getPhoneNumberDetails?.().then(r => {
-      if (r?.ok !== false) setNumberName(r?.verified_name || r?.display_phone_number || '');
+      if (r?.ok !== false) {
+        const n = r?.verified_name || r?.display_phone_number || '';
+        setNumberName(n);
+        if (n) localStorage.setItem('wa_number_name', n);
+      }
     }).catch(() => {});
   }, []);
 

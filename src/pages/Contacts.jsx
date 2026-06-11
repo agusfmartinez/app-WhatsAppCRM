@@ -142,6 +142,84 @@ function ContactModal({ contact, tags, onSave, onClose }) {
   );
 }
 
+function TagsManager({ tags, onChange, onClose }) {
+  const [list, setList] = useState(tags);
+  const [newName, setNewName] = useState('');
+  const [newColor, setNewColor] = useState(TAG_COLORS[0]);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = async () => {
+    const t = (await window.api?.tags?.list()) ?? [];
+    setList(t);
+    onChange?.();
+  };
+
+  const add = async () => {
+    if (!newName.trim()) return;
+    setBusy(true);
+    await window.api?.tags?.create({ name: newName.trim(), color: newColor });
+    setNewName(''); setNewColor(TAG_COLORS[0]);
+    await refresh();
+    setBusy(false);
+  };
+
+  const save = async (t) => { await window.api?.tags?.update(t.id, { name: t.name, color: t.color }); refresh(); };
+  const remove = async (id) => {
+    if (!confirm('¿Eliminar etiqueta? Se quita de todos los contactos.')) return;
+    await window.api?.tags?.delete(id);
+    refresh();
+  };
+
+  const ColorPicker = ({ value, onPick }) => (
+    <div className="flex gap-1">
+      {TAG_COLORS.map(c => (
+        <button key={c} type="button" onClick={() => onPick(c)}
+          className={`h-5 w-5 rounded-full border-2 ${value === c ? 'border-white' : 'border-transparent'}`} style={{ backgroundColor: c }} />
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md mx-4 shadow-2xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800 shrink-0">
+          <h2 className="text-base font-semibold text-white">Etiquetas</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300"><svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg></button>
+        </div>
+
+        <div className="px-6 py-5 overflow-y-auto flex-1 space-y-3">
+          {list.length === 0 && <p className="text-xs text-gray-500 text-center py-2">Sin etiquetas. Creá la primera abajo.</p>}
+          {list.map((t, i) => (
+            <div key={t.id} className="flex items-center gap-2">
+              <input value={t.name}
+                onChange={e => setList(l => l.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
+                onBlur={() => save(list[i])}
+                className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-green-500" />
+              <ColorPicker value={t.color} onPick={c => { setList(l => l.map((x, j) => j === i ? { ...x, color: c } : x)); save({ ...t, color: c }); }} />
+              <button onClick={() => remove(t.id)} className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-gray-800">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+              </button>
+            </div>
+          ))}
+
+          <div className="border-t border-gray-800 pt-3 space-y-2">
+            <span className="text-xs text-gray-400 uppercase tracking-wide">Nueva etiqueta</span>
+            <div className="flex items-center gap-2">
+              <input value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()}
+                placeholder="Nombre" className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-green-500" />
+              <ColorPicker value={newColor} onPick={setNewColor} />
+            </div>
+            <button onClick={add} disabled={!newName.trim() || busy}
+              className="w-full py-2 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-40 text-sm font-medium text-white transition-colors">
+              + Agregar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Contacts() {
   const navigate = useNavigate();
   const [contacts, setContacts] = useState([]);
@@ -149,6 +227,7 @@ export default function Contacts() {
   const [search, setSearch] = useState('');
   const [filterTag, setFilterTag] = useState(null);
   const [modal, setModal] = useState(null); // null | 'new' | contact obj
+  const [tagsModal, setTagsModal] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null); // contact id pending delete
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -234,6 +313,11 @@ export default function Contacts() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
             </svg>
             {syncing ? 'Sincronizando...' : ''}
+          </button>
+          <button onClick={() => setTagsModal(true)}
+            className="flex items-center gap-1.5 px-3 py-2 border border-gray-700 hover:border-gray-600 text-sm text-gray-400 hover:text-gray-200 rounded-lg transition-colors">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z"/></svg>
+            Etiquetas
           </button>
           <button
             onClick={() => setModal('new')}
@@ -362,6 +446,7 @@ export default function Contacts() {
           onClose={() => setModal(null)}
         />
       )}
+      {tagsModal && <TagsManager tags={tags} onChange={load} onClose={() => setTagsModal(false)} />}
     </div>
   );
 }

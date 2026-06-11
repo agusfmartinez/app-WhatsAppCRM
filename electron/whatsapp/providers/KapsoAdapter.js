@@ -18,6 +18,18 @@ function traceApi(method, url, status, ms, error) {
   if (_isDev) console.log('[kapso-api]', line + (error ? ` ${error}` : ''));
   try { apiLogger()?.info(line, { method, status, ms, error: error ? String(error).slice(0, 200) : undefined }); } catch {}
 }
+// fetch wrapper that traces method/url/status/duration (rethrows so callers handle errors)
+async function tracedFetch(method, url, opts) {
+  const t0 = Date.now();
+  try {
+    const res = await fetch(url, opts);
+    traceApi(method, url, res.status, Date.now() - t0);
+    return res;
+  } catch (err) {
+    traceApi(method, url, 'ERR', Date.now() - t0, err.message);
+    throw err;
+  }
+}
 
 class KapsoAdapter extends IWhatsAppProvider {
   constructor() {
@@ -93,7 +105,7 @@ class KapsoAdapter extends IWhatsAppProvider {
     if (after) params.set('after', after);
     if (before) params.set('before', before);
     try {
-      const res = await fetch(`${KAPSO_PLATFORM}/whatsapp/messages?${params}`, {
+      const res = await tracedFetch('GET', `${KAPSO_PLATFORM}/whatsapp/messages?${params}`, {
         headers: { 'X-API-Key': this._apiKey },
       });
       if (!res.ok) { const t = await res.text().catch(() => ''); return { ok: false, error: `Kapso ${res.status}: ${t}` }; }
@@ -186,7 +198,7 @@ class KapsoAdapter extends IWhatsAppProvider {
     if (!this._apiKey || !this._businessAccountId) return { ok: false, error: 'Business Account ID no configurado' };
     const url = `${KAPSO_BASE}/${this._businessAccountId}/message_templates?name=${encodeURIComponent(templateName)}`;
     try {
-      const res = await fetch(url, {
+      const res = await tracedFetch('DELETE', url, {
         method: 'DELETE',
         headers: { 'X-API-Key': this._apiKey },
       });
@@ -218,7 +230,7 @@ class KapsoAdapter extends IWhatsAppProvider {
   async getDisplayNameRequests() {
     if (!this._apiKey || !this._phoneNumberId) return { ok: false, error: 'Not connected' };
     try {
-      const res = await fetch(`${KAPSO_PLATFORM}/whatsapp/phone_numbers/${this._phoneNumberId}/display_name_requests?per_page=5`, {
+      const res = await tracedFetch('GET', `${KAPSO_PLATFORM}/whatsapp/phone_numbers/${this._phoneNumberId}/display_name_requests?per_page=5`, {
         headers: { 'X-API-Key': this._apiKey },
       });
       if (!res.ok) { const t = await res.text().catch(() => ''); return { ok: false, error: `Kapso ${res.status}: ${t}` }; }
@@ -232,7 +244,7 @@ class KapsoAdapter extends IWhatsAppProvider {
     if (!this._apiKey || !this._phoneNumberId) return { ok: false, error: 'Not connected' };
     if (!newName?.trim()) return { ok: false, error: 'Nombre vacío' };
     try {
-      const res = await fetch(`${KAPSO_PLATFORM}/whatsapp/phone_numbers/${this._phoneNumberId}/display_name_requests`, {
+      const res = await tracedFetch('POST', `${KAPSO_PLATFORM}/whatsapp/phone_numbers/${this._phoneNumberId}/display_name_requests`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-API-Key': this._apiKey },
         body: JSON.stringify({ display_name_request: { new_display_name: newName.trim() } }),
@@ -314,7 +326,7 @@ class KapsoAdapter extends IWhatsAppProvider {
   async getPhoneNumberDetails() {
     if (!this._apiKey || !this._phoneNumberId) return { ok: false, error: 'Not connected' };
     try {
-      const res = await fetch(`${KAPSO_PLATFORM}/whatsapp/phone_numbers/${this._phoneNumberId}`, {
+      const res = await tracedFetch('GET', `${KAPSO_PLATFORM}/whatsapp/phone_numbers/${this._phoneNumberId}`, {
         headers: { 'X-API-Key': this._apiKey },
       });
       if (!res.ok) { const t = await res.text().catch(() => ''); return { ok: false, error: `Kapso ${res.status}: ${t}` }; }
@@ -343,7 +355,7 @@ class KapsoAdapter extends IWhatsAppProvider {
     if (this._status !== 'connected') return { ok: false, error: 'Not connected' };
     const url = `${KAPSO_BASE}/${this._phoneNumberId}/block_users`;
     try {
-      const res = await fetch(url, {
+      const res = await tracedFetch('DELETE', url, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', 'X-API-Key': this._apiKey },
         body: JSON.stringify({
@@ -371,7 +383,7 @@ class KapsoAdapter extends IWhatsAppProvider {
   static async fetchPhoneNumbers(apiKey) {
     if (!apiKey) return { ok: false, error: 'API Key requerida' };
     try {
-      const res = await fetch(`${KAPSO_PLATFORM}/whatsapp/phone_numbers?per_page=50`, {
+      const res = await tracedFetch('GET', `${KAPSO_PLATFORM}/whatsapp/phone_numbers?per_page=50`, {
         headers: { 'X-API-Key': apiKey },
       });
       if (!res.ok) {
@@ -399,13 +411,13 @@ class KapsoAdapter extends IWhatsAppProvider {
     try {
       // 1. Find the customer (most recent first); create one if the account has none.
       let customerId = null;
-      const listRes = await fetch(`${KAPSO_PLATFORM}/customers?per_page=1`, { headers });
+      const listRes = await tracedFetch('GET', `${KAPSO_PLATFORM}/customers?per_page=1`, { headers });
       if (listRes.ok) {
         const j = await listRes.json().catch(() => ({}));
         customerId = j?.data?.[0]?.id ?? null;
       }
       if (!customerId) {
-        const createRes = await fetch(`${KAPSO_PLATFORM}/customers`, {
+        const createRes = await tracedFetch('POST', `${KAPSO_PLATFORM}/customers`, {
           method: 'POST', headers,
           body: JSON.stringify({ customer: { name: 'Mi negocio' } }),
         });
@@ -417,7 +429,7 @@ class KapsoAdapter extends IWhatsAppProvider {
 
       // 2. Create the setup link for that customer.
       const body = { setup_link: { language, ...(theme ? { theme_config: theme } : {}) } };
-      const res = await fetch(`${KAPSO_PLATFORM}/customers/${customerId}/setup_links`, {
+      const res = await tracedFetch('POST', `${KAPSO_PLATFORM}/customers/${customerId}/setup_links`, {
         method: 'POST', headers, body: JSON.stringify(body),
       });
       if (!res.ok) { const t = await res.text().catch(() => ''); return { ok: false, error: `Kapso ${res.status}: ${t}` }; }
