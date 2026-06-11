@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useDialog } from '../components/Dialog.jsx';
 
 const STATUS_LABELS = { draft: 'Borrador', scheduled: 'Programada', sending: 'Enviando…', completed: 'Completada', failed: 'Fallida' };
 const STATUS_COLORS = {
@@ -52,6 +53,7 @@ function ConfigRow({ label, value }) {
 export default function CampaignDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const dialog = useDialog();
   const [c, setC] = useState(null);
   const [recipients, setRecipients] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -113,23 +115,23 @@ export default function CampaignDetail() {
     setBusy(true);
     const res = await window.api?.campaigns?.send(id, scheduledAt ? { scheduledAt } : undefined);
     setBusy(false); setScheduling(false); setScheduleAt('');
-    if (!res?.ok) { alert(res?.error || 'Error al enviar'); return; }
+    if (!res?.ok) { dialog.alert(res?.error || 'Error al enviar', { title: 'No se pudo enviar', tone: 'danger' }); return; }
     if (res.warnings?.length || res.duplicates) {
       const parts = [`${res.added} cargados`];
       if (res.duplicates) parts.push(`${res.duplicates} duplicados`);
       if (res.warnings?.length) parts.push(`${res.warnings.length} con problemas:\n• ${res.warnings.slice(0, 5).join('\n• ')}`);
-      alert(parts.join('\n'));
+      dialog.alert(parts.join('\n'), { title: 'Enviado con avisos' });
     }
     load();
   };
 
   const doCancel = async () => {
-    if (!confirm('¿Cancelar la programación? Vuelve a borrador.')) return;
+    if (!(await dialog.confirm('¿Cancelar la programación? Vuelve a borrador.'))) return;
     setBusy(true); await window.api?.campaigns?.cancel(id); setBusy(false); load();
   };
 
   const doDelete = async () => {
-    if (!confirm('¿Eliminar campaña?')) return;
+    if (!(await dialog.confirm('¿Eliminar campaña?', { tone: 'danger' }))) return;
     await window.api?.campaigns?.delete(id);
     navigate('/campaigns');
   };

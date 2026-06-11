@@ -31,6 +31,7 @@ import SessionExpired from './components/SessionExpired.jsx';
 import ForceUpdate from './components/ForceUpdate.jsx';
 import UpdateUI from './components/UpdateUI.jsx';
 import { UpdateProvider } from './context/UpdateContext.jsx';
+import { DialogProvider } from './components/Dialog.jsx';
 
 const PUBLIC_ROUTES = ['/login', '/signup', '/pending'];
 
@@ -286,8 +287,10 @@ function Root() {
 createRoot(document.getElementById('root')).render(
   <UpdateProvider>
     <HashRouter>
-      <UpdateUI />
-      <Root />
+      <DialogProvider>
+        <UpdateUI />
+        <Root />
+      </DialogProvider>
     </HashRouter>
   </UpdateProvider>
 );

@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useDialog } from '../components/Dialog.jsx';
 
 const STATUS_LABELS = { draft: 'Borrador', scheduled: 'Programada', sending: 'Enviando…', completed: 'Completada', failed: 'Fallida' };
 const STATUS_COLORS = {
@@ -417,6 +418,7 @@ export default function Campaigns() {
   const pollRef = useRef(null);
   const importedRef = useRef(false);
   const navigate = useNavigate();
+  const dialog = useDialog();
 
   const load = useCallback(() => {
     setLoading(true);
@@ -428,7 +430,7 @@ export default function Campaigns() {
     const res = await window.api?.campaigns?.importBroadcasts();
     if (!silent) setImporting(false);
     if (res?.ok) load();
-    else if (!silent) alert(res?.error || 'Error importando');
+    else if (!silent) dialog.alert(res?.error || 'Error importando de Kapso', { title: 'Error', tone: 'danger' });
   }, [load]);
 
   useEffect(() => { load(); }, [load]);
@@ -454,12 +456,12 @@ export default function Campaigns() {
     setScheduling(null);
     setScheduleAt('');
     if (!res?.ok) {
-      alert(res?.error || 'Error al enviar');
+      dialog.alert(res?.error || 'Error al enviar', { title: 'No se pudo enviar', tone: 'danger' });
     } else if (res.warnings?.length || res.duplicates) {
       const parts = [`${res.added} destinatarios cargados`];
       if (res.duplicates) parts.push(`${res.duplicates} duplicados omitidos`);
       if (res.warnings?.length) parts.push(`${res.warnings.length} con problemas:\n• ${res.warnings.slice(0, 5).join('\n• ')}`);
-      alert(parts.join('\n'));
+      dialog.alert(parts.join('\n'), { title: 'Enviado con avisos' });
     }
     load();
   };
@@ -472,7 +474,7 @@ export default function Campaigns() {
   };
 
   const handleCancel = async (id) => {
-    if (!confirm('¿Cancelar la programación? Vuelve a borrador.')) return;
+    if (!(await dialog.confirm('¿Cancelar la programación? Vuelve a borrador.'))) return;
     setBusy(id);
     await window.api?.campaigns?.cancel(id);
     setBusy(null);
@@ -480,7 +482,7 @@ export default function Campaigns() {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm('¿Eliminar campaña?')) return;
+    if (!(await dialog.confirm('¿Eliminar campaña?', { tone: 'danger' }))) return;
     await window.api?.campaigns?.delete(id);
     load();
   };

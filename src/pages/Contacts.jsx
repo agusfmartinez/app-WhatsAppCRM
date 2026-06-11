@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useDialog } from '../components/Dialog.jsx';
 
 const TAG_COLORS = ['#6b7280', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899'];
 const PAGE_SIZE = 50;
@@ -206,6 +207,7 @@ function ContactModal({ contact, tags, onSave, onClose }) {
 }
 
 function TagsManager({ tags, onChange, onClose }) {
+  const dialog = useDialog();
   const [list, setList] = useState(tags);
   const [newName, setNewName] = useState('');
   const [newColor, setNewColor] = useState(TAG_COLORS[0]);
@@ -228,7 +230,7 @@ function TagsManager({ tags, onChange, onClose }) {
 
   const save = async (t) => { await window.api?.tags?.update(t.id, { name: t.name, color: t.color }); refresh(); };
   const remove = async (id) => {
-    if (!confirm('¿Eliminar etiqueta? Se quita de todos los contactos.')) return;
+    if (!(await dialog.confirm('¿Eliminar etiqueta? Se quita de todos los contactos.', { tone: 'danger' }))) return;
     await window.api?.tags?.delete(id);
     refresh();
   };
@@ -285,6 +287,7 @@ function TagsManager({ tags, onChange, onClose }) {
 
 export default function Contacts() {
   const navigate = useNavigate();
+  const dialog = useDialog();
   const [contacts, setContacts] = useState([]);
   const [tags, setTags] = useState([]);
   const [search, setSearch] = useState('');
@@ -324,7 +327,7 @@ export default function Contacts() {
 
   const handleExport = async () => {
     const all = (await window.api?.contacts?.list({})) ?? []; // no limit → all contacts
-    if (!all.length) return alert('No hay contactos para exportar.');
+    if (!all.length) { dialog.alert('No hay contactos para exportar.'); return; }
     downloadContactsCSV(all);
   };
 
@@ -333,11 +336,11 @@ export default function Contacts() {
     const reader = new FileReader();
     reader.onload = async () => {
       const { rows, error } = parseContactsCSV(String(reader.result || ''));
-      if (error) { alert(error); return; }
-      if (!confirm(`Importar ${rows.length} contactos? (se actualizan los existentes por teléfono)`)) return;
+      if (error) { dialog.alert(error, { title: 'CSV inválido', tone: 'danger' }); return; }
+      if (!(await dialog.confirm(`Importar ${rows.length} contactos? (se actualizan los existentes por teléfono)`))) return;
       const res = await window.api?.contacts?.import(rows);
       if (res?.ok) { setSyncResult({ ok: true, created: res.created, updated: res.updated }); load(); }
-      else alert(res?.error || 'Error al importar');
+      else dialog.alert(res?.error || 'Error al importar', { title: 'Error', tone: 'danger' });
     };
     reader.readAsText(file, 'UTF-8');
   };

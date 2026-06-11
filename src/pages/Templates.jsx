@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useDialog } from '../components/Dialog.jsx';
 
 const STATUS_COLOR = {
   APPROVED: 'bg-green-500/15 text-green-400',
@@ -366,6 +367,7 @@ function TestModal({ template, onClose }) {
 }
 
 export default function Templates() {
+  const dialog = useDialog();
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
@@ -486,10 +488,10 @@ export default function Templates() {
                     {/* Delete */}
                     <button
                       onClick={async () => {
-                        if (!confirm(`¿Eliminar "${t.name}"? Esta acción no se puede deshacer.`)) return;
+                        if (!(await dialog.confirm(`¿Eliminar "${t.name}"? Esta acción no se puede deshacer.`, { tone: 'danger' }))) return;
                         const res = await window.api?.whatsapp?.deleteTemplate?.(t.name);
                         if (res?.ok) load();
-                        else alert(res?.error || 'Error al eliminar');
+                        else dialog.alert(res?.error || 'Error al eliminar', { title: 'Error', tone: 'danger' });
                       }}
                       className="p-1.5 rounded-lg text-gray-600 hover:text-red-400 hover:bg-gray-700 transition-colors"
                       title="Eliminar template"
