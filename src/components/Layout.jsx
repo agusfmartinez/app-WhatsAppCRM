@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { clearSession } from '../lib/session';
@@ -40,6 +40,7 @@ function navClass({ isActive }) {
 }
 
 export default function Layout() {
+  const navigate = useNavigate();
   const [waStatus, setWaStatus] = useState('disconnected');
   const [appVersion, setAppVersion] = useState('');
   const [showWizard, setShowWizard] = useState(false);
@@ -59,8 +60,14 @@ export default function Layout() {
 
     const handler = (e) => { if (e.type === 'status') setWaStatus(e.status); };
     window.api?.onWhatsAppEvent?.(handler);
-    return () => window.api?.offWhatsAppEvent?.(handler);
-  }, []);
+
+    // Notification click → go to Inbox and open that conversation
+    const offOpen = window.api?.onOpenConversation?.(({ conversationId }) => {
+      navigate('/inbox', { state: { openConversationId: conversationId } });
+    });
+
+    return () => { window.api?.offWhatsAppEvent?.(handler); offOpen?.(); };
+  }, [navigate]);
 
   const handleLogout = async () => {
     clearSession();

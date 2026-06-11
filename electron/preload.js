@@ -21,6 +21,18 @@ contextBridge.exposeInMainWorld('api', {
     const wrapped = waListeners.get(cb);
     if (wrapped) { ipcRenderer.removeListener('whatsapp:event', wrapped); waListeners.delete(cb); }
   },
+  // New inbound message detected by the background poller → returns unsubscribe fn
+  onNewMessage: (cb) => {
+    const h = (_e, data) => cb(data);
+    ipcRenderer.on('whatsapp:new-message', h);
+    return () => ipcRenderer.removeListener('whatsapp:new-message', h);
+  },
+  // Notification clicked → open a conversation. Returns unsubscribe fn
+  onOpenConversation: (cb) => {
+    const h = (_e, data) => cb(data);
+    ipcRenderer.on('inbox:open-conversation', h);
+    return () => ipcRenderer.removeListener('inbox:open-conversation', h);
+  },
   onUpdaterLog: (cb) => {
     const wrapped = (_e, data) => cb(data);
     const existing = updaterListeners.get(cb);
@@ -121,6 +133,9 @@ contextBridge.exposeInMainWorld('api', {
 
   // Open a URL in the system browser
   openExternal: (url) => ipcRenderer.invoke('app:open-external', url),
+
+  // Tell main which inbox conversation is open (to skip notifying it when focused)
+  setActiveConversation: (id) => ipcRenderer.send('inbox:set-active', id),
 });
 
 contextBridge.exposeInMainWorld('updater', {

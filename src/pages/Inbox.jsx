@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 
-const POLL_INTERVAL = 30_000;
+const POLL_INTERVAL = 30_000;       // conversation list
+const ACTIVE_POLL_INTERVAL = 5_000; // open conversation — fast for chat-like feel (API reads are free)
 const WINDOW_MS = 24 * 60 * 60 * 1000; // WhatsApp customer-service window
 const LAST_READ_KEY = 'inbox:lastRead';
 
@@ -185,16 +186,17 @@ export default function Inbox() {
     setLoadingMoreConvs(false);
   }, [convsCursor]);
 
-  const loadMessages = useCallback(async (conv) => {
+  // silent=true (background poll) skips the loading state so the chat doesn't flicker
+  const loadMessages = useCallback(async (conv, { silent = false } = {}) => {
     if (!conv) return;
-    setLoadingMsgs(true);
+    if (!silent) setLoadingMsgs(true);
     const res = await window.api?.whatsapp?.listMessages({ conversationId: conv.id, limit: 60 });
     if (res?.ok) {
       // Messages come newest-first; reverse for chat display (oldest→newest)
       setMessages([...(res.data || [])].reverse());
       setMsgsCursor(res.paging?.next ? res.paging?.cursors?.after : null);
     }
-    setLoadingMsgs(false);
+    if (!silent) setLoadingMsgs(false);
   }, []);
 
   // Load older messages (older page) and prepend to history
@@ -213,23 +215,45 @@ export default function Inbox() {
     setLoadingOlder(false);
   }, [active, msgsCursor]);
 
-  // Initial load + polling
+  // Initial load + polling (pauses when the window is hidden; the main-process
+  // poller keeps watching for notifications)
   useEffect(() => {
     loadConversations();
-    pollRef.current = setInterval(loadConversations, POLL_INTERVAL);
+    pollRef.current = setInterval(() => {
+      if (document.visibilityState === 'visible') loadConversations();
+    }, POLL_INTERVAL);
     return () => clearInterval(pollRef.current);
   }, [loadConversations]);
 
-  // Auto-select conversation when navigated from Contacts with filterPhone
+  // Refresh immediately when the background poller detects a new inbound message
   useEffect(() => {
-    if (!state?.filterPhone || autoSelectedRef.current || conversations.length === 0) return;
+    const off = window.api?.onNewMessage?.(() => {
+      loadConversations();
+      if (active) loadMessages(active, { silent: true });
+    });
+    return () => off?.();
+  }, [loadConversations, loadMessages, active]);
+
+  // Tell the main process which conversation is open (so it can skip notifying it)
+  useEffect(() => {
+    window.api?.setActiveConversation?.(active?.id || null);
+    return () => window.api?.setActiveConversation?.(null);
+  }, [active]);
+
+  // Auto-select from Contacts (filterPhone) — one-shot on first nav
+  useEffect(() => {
+    if (autoSelectedRef.current || !state?.filterPhone || conversations.length === 0) return;
     const targetPhone = normPhone(state.filterPhone);
     const match = conversations.find(c => normPhone(c.phone_number) === targetPhone);
-    if (match) {
-      setActive(match);
-      autoSelectedRef.current = true;
-    }
+    if (match) { setActive(match); autoSelectedRef.current = true; }
   }, [conversations, state?.filterPhone]);
+
+  // Open a conversation from a notification click — selects whenever the id changes
+  useEffect(() => {
+    if (!state?.openConversationId || conversations.length === 0) return;
+    const match = conversations.find(c => c.id === state.openConversationId);
+    if (match) setActive(match);
+  }, [conversations, state?.openConversationId]);
 
   // Load messages when conversation changes + mark as read
   useEffect(() => {
@@ -244,10 +268,12 @@ export default function Inbox() {
     }
   }, [active, loadMessages]);
 
-  // Poll messages for active conversation
+  // Poll the open conversation fast (chat-like). Pauses when the window is hidden.
   useEffect(() => {
     if (!active) return;
-    const t = setInterval(() => loadMessages(active), POLL_INTERVAL);
+    const t = setInterval(() => {
+      if (document.visibilityState === 'visible') loadMessages(active, { silent: true });
+    }, ACTIVE_POLL_INTERVAL);
     return () => clearInterval(t);
   }, [active, loadMessages]);
 

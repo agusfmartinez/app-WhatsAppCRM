@@ -6,10 +6,12 @@ const { initCrashLogger, writeCrash } = require('./crashLogger');
 const { initDb, closeDb } = require('./db/database');
 const { initCrm } = require('./ipc/crm.ipc');
 const { createWhatsAppManager } = require('./whatsapp/WhatsAppManager');
+const { startInboxPoller } = require('./whatsapp/inboxPoller');
 const { autoUpdater } = require("electron-updater");
 
 let win;
 let splash;
+let activeConvId = null;
 let appLogger;
 let ipcLogger;
 let securityLogger;
@@ -313,9 +315,17 @@ app.whenReady().then(async () => {
   // Auto-connect WhatsApp using saved settings
   tryAutoConnect(waManager, appLogger);
 
+  // Windows: needed for native notifications to show the app name/icon
+  try { app.setAppUserModelId('com.wacrm.desktop'); } catch {}
+
   createSplash();
   createWindow();
   initAutoUpdate();
+
+  // Local near-real-time inbox: notify on new inbound messages (no server).
+  // The renderer reports which conversation is open so we don't notify it when focused.
+  ipcMain.on('inbox:set-active', (_e, id) => { activeConvId = id || null; });
+  startInboxPoller(waManager, () => win, appLogger, () => activeConvId);
 
   win.once('ready-to-show', () => {
     if (splash) splash.close();
