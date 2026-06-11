@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld('api', {
     update: (id, data) => ipcRenderer.invoke('crm:contacts:update', id, data),
     delete: (id) => ipcRenderer.invoke('crm:contacts:delete', id),
     stats: () => ipcRenderer.invoke('crm:contacts:stats'),
+    import: (rows) => ipcRenderer.invoke('crm:contacts:import', rows),
   },
 
   // ── CRM: Tags ─────────────────────────────────────────────────────────────

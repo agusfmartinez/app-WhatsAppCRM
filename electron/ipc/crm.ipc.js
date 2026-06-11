@@ -119,6 +119,54 @@ function initCrm(ipcMain, waManager) {
     return { total: row?.total ?? 0 };
   });
 
+  // Bulk import from CSV rows: [{ name, phone, email, company, notes, tags:[] }]
+  // Upsert by phone; updates only fill empty fields. Tags matched/created by name.
+  ipcMain.handle('crm:contacts:import', (_e, rows) => {
+    const tagByName = {};
+    all(`SELECT id, name FROM tags`).forEach(t => { tagByName[t.name.trim().toLowerCase()] = t.id; });
+    const ensureTag = (name) => {
+      const k = String(name || '').trim().toLowerCase();
+      if (!k) return null;
+      if (tagByName[k]) return tagByName[k];
+      const { lastInsertRowid } = run(`INSERT INTO tags (name, color) VALUES (?, ?)`, [String(name).trim(), '#6b7280']);
+      tagByName[k] = lastInsertRowid;
+      return lastInsertRowid;
+    };
+
+    let created = 0, updated = 0, skipped = 0;
+    for (const r of rows || []) {
+      const phone = String(r?.phone || '').replace(/[^0-9]/g, '');
+      if (!phone) { skipped++; continue; }
+      const existing = first(`SELECT id FROM contacts WHERE phone = ?`, [phone]);
+      let cid;
+      if (existing) {
+        cid = existing.id;
+        runBatch(
+          `UPDATE contacts SET name=COALESCE(NULLIF(?,''),name), email=COALESCE(NULLIF(?,''),email),
+             company=COALESCE(NULLIF(?,''),company), notes=COALESCE(NULLIF(?,''),notes), updated_at=datetime('now')
+           WHERE id=?`,
+          [r.name || '', r.email || '', r.company || '', r.notes || '', cid]
+        );
+        updated++;
+      } else {
+        const { lastInsertRowid } = run(
+          `INSERT INTO contacts (name, phone, email, company, notes) VALUES (?, ?, ?, ?, ?)`,
+          [r.name?.trim() || phone, phone, r.email || null, r.company || null, r.notes || null]
+        );
+        cid = lastInsertRowid;
+        created++;
+      }
+      if (Array.isArray(r.tags)) {
+        for (const tn of r.tags) {
+          const tid = ensureTag(tn);
+          if (tid) runBatch(`INSERT OR IGNORE INTO contact_tags (contact_id, tag_id) VALUES (?, ?)`, [cid, tid]);
+        }
+      }
+    }
+    saveDb();
+    return { ok: true, created, updated, skipped };
+  });
+
   // ─── Tags ─────────────────────────────────────────────────────────────────
 
   ipcMain.handle('crm:tags:list', () => all(`SELECT * FROM tags ORDER BY name ASC`));

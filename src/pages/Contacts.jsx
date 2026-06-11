@@ -4,6 +4,69 @@ import { useNavigate } from 'react-router-dom';
 const TAG_COLORS = ['#6b7280', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899'];
 const PAGE_SIZE = 50;
 
+// CSV cell escaping (RFC4180): quote if it has comma, quote or newline
+function csvCell(v) {
+  const s = String(v ?? '');
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+// Split a CSV line respecting quoted cells
+function splitCsvLine(line, sep) {
+  const out = []; let cur = ''; let q = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (q) {
+      if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      else if (ch === '"') q = false;
+      else cur += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === sep) { out.push(cur); cur = ''; }
+    else cur += ch;
+  }
+  out.push(cur);
+  return out.map(c => c.trim());
+}
+
+// Parse a contacts CSV → [{ name, phone, email, company, notes, tags:[] }]
+function parseContactsCSV(text) {
+  const lines = text.replace(/\r/g, '').split('\n').filter(l => l.trim().length);
+  if (!lines.length) return { rows: [], error: 'Archivo vacío' };
+  const sep = [',', ';', '\t', '|'].map(s => ({ s, n: lines[0].split(s).length })).sort((a, b) => b.n - a.n)[0].s;
+  const headers = splitCsvLine(lines[0], sep).map(h => h.toLowerCase());
+  const col = (re) => headers.findIndex(h => re.test(h));
+  const iPhone = col(/phone_number|^phone$|tel[eé]fono|^tel$/), iName = col(/^name$|^nombre$/),
+    iEmail = col(/email|correo/), iCompany = col(/company|empresa/), iNotes = col(/notes|notas/), iTags = col(/tags|etiquetas/);
+  if (iPhone < 0) return { rows: [], error: 'Falta la columna de teléfono (phone_number).' };
+  const rows = lines.slice(1).map(l => {
+    const c = splitCsvLine(l, sep);
+    return {
+      phone: c[iPhone] || '',
+      name: iName >= 0 ? c[iName] : '',
+      email: iEmail >= 0 ? c[iEmail] : '',
+      company: iCompany >= 0 ? c[iCompany] : '',
+      notes: iNotes >= 0 ? c[iNotes] : '',
+      tags: iTags >= 0 ? (c[iTags] || '').split(/[;|]/).map(t => t.trim()).filter(Boolean) : [],
+    };
+  }).filter(r => String(r.phone).replace(/[^0-9]/g, ''));
+  return { rows, error: rows.length ? '' : 'No se encontraron filas con teléfono válido' };
+}
+
+function downloadContactsCSV(contacts) {
+  const headers = ['name', 'phone', 'email', 'company', 'notes', 'tags'];
+  const lines = [headers.join(',')];
+  for (const c of contacts) {
+    const tags = (c.tags || []).map(t => t.name).join(';');
+    lines.push([c.name, c.phone, c.email, c.company, c.notes, tags].map(csvCell).join(','));
+  }
+  const blob = new Blob(['﻿' + lines.join('\n') + '\n'], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `contactos_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function TagBadge({ tag }) {
   return (
     <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ backgroundColor: tag.color + '22', color: tag.color }}>
@@ -259,6 +322,26 @@ export default function Contacts() {
 
   // DB-first: no auto-sync on mount. Use the manual "Sincronizar" button to pull from Kapso.
 
+  const handleExport = async () => {
+    const all = (await window.api?.contacts?.list({})) ?? []; // no limit → all contacts
+    if (!all.length) return alert('No hay contactos para exportar.');
+    downloadContactsCSV(all);
+  };
+
+  const handleImport = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const { rows, error } = parseContactsCSV(String(reader.result || ''));
+      if (error) { alert(error); return; }
+      if (!confirm(`Importar ${rows.length} contactos? (se actualizan los existentes por teléfono)`)) return;
+      const res = await window.api?.contacts?.import(rows);
+      if (res?.ok) { setSyncResult({ ok: true, created: res.created, updated: res.updated }); load(); }
+      else alert(res?.error || 'Error al importar');
+    };
+    reader.readAsText(file, 'UTF-8');
+  };
+
   const handleSave = async (form) => {
     if (modal === 'new') {
       await window.api?.contacts?.create(form);
@@ -313,6 +396,16 @@ export default function Contacts() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
             </svg>
             {syncing ? 'Sincronizando...' : ''}
+          </button>
+          <label className="flex items-center gap-1.5 px-3 py-2 border border-gray-700 hover:border-gray-600 text-sm text-gray-400 hover:text-gray-200 rounded-lg transition-colors cursor-pointer">
+            <input type="file" accept=".csv,text/csv" className="hidden" onChange={e => { handleImport(e.target.files?.[0]); e.target.value = ''; }} />
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M16 8l-4-4m0 0L8 8m4-4v12"/></svg>
+            Importar
+          </label>
+          <button onClick={handleExport}
+            className="flex items-center gap-1.5 px-3 py-2 border border-gray-700 hover:border-gray-600 text-sm text-gray-400 hover:text-gray-200 rounded-lg transition-colors">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            Exportar
           </button>
           <button onClick={() => setTagsModal(true)}
             className="flex items-center gap-1.5 px-3 py-2 border border-gray-700 hover:border-gray-600 text-sm text-gray-400 hover:text-gray-200 rounded-lg transition-colors">
