@@ -1,5 +1,7 @@
 const { Notification } = require('electron');
 
+const stamp = () => new Date().toLocaleString('es-AR', { hour12: false });
+
 /**
  * Local "near real-time" inbox: polls Kapso for recent messages and fires a native
  * notification when a new INBOUND message arrives. No server/webhook needed.
@@ -30,7 +32,7 @@ function startInboxPoller(waManager, getWin, logger, getActiveConvId, getEnabled
       if (!primed) {
         lastSeen = msgs.reduce((mx, m) => Math.max(mx, ts(m)), 0);
         primed = true;
-        console.log(`[inbox-poller] primed: lastSeen=${lastSeen}, ${msgs.length} msgs, Notification.isSupported=${Notification.isSupported()}`);
+        console.log(`${stamp()} [inbox-poller] primed: lastSeen=${lastSeen}, ${msgs.length} msgs, Notification.isSupported=${Notification.isSupported()}`);
         return;
       }
 
@@ -40,7 +42,7 @@ function startInboxPoller(waManager, getWin, logger, getActiveConvId, getEnabled
 
       if (!fresh.length) return;
       lastSeen = Math.max(lastSeen, ...fresh.map(ts));
-      console.log(`[inbox-poller] ${fresh.length} inbound nuevo(s) → notificando (isSupported=${Notification.isSupported()})`);
+      console.log(`${stamp()} [inbox-poller] ${fresh.length} inbound nuevo(s) → notificando (isSupported=${Notification.isSupported()})`);
 
       const win = getWin();
       // "Visible" (shown, not minimized) is enough — the chat may be on a second

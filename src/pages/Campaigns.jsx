@@ -396,27 +396,14 @@ function CampaignWizard({ onClose, onCreated }) {
   );
 }
 
-// ── Stats row ───────────────────────────────────────────────────────────────
-function Stat({ label, value, color, sub }) {
-  return (
-    <div className="text-center">
-      <div className={`text-sm font-semibold ${color || 'text-gray-200'}`}>{value}</div>
-      <div className="text-[10px] text-gray-500 uppercase tracking-wide">{label}</div>
-      {sub != null && <div className="text-[10px] text-gray-600">{sub}</div>}
-    </div>
-  );
-}
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function Campaigns() {
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [wizard, setWizard] = useState(false);
   const [busy, setBusy] = useState(null); // campaign id with an in-flight action
-  const [scheduling, setScheduling] = useState(null); // campaign id showing the schedule input
-  const [scheduleAt, setScheduleAt] = useState('');
   const [importing, setImporting] = useState(false);
   const pollRef = useRef(null);
-  const importedRef = useRef(false);
   const navigate = useNavigate();
   const dialog = useDialog();
 
@@ -449,36 +436,11 @@ export default function Campaigns() {
     return () => clearInterval(pollRef.current);
   }, [campaigns]);
 
-  const handleSend = async (id, scheduledAt = null) => {
-    setBusy(id);
-    const res = await window.api?.campaigns?.send(id, scheduledAt ? { scheduledAt } : undefined);
-    setBusy(null);
-    setScheduling(null);
-    setScheduleAt('');
-    if (!res?.ok) {
-      dialog.alert(res?.error || 'Error al enviar', { title: 'No se pudo enviar', tone: 'danger' });
-    } else if (res.warnings?.length || res.duplicates) {
-      const parts = [`${res.added} destinatarios cargados`];
-      if (res.duplicates) parts.push(`${res.duplicates} duplicados omitidos`);
-      if (res.warnings?.length) parts.push(`${res.warnings.length} con problemas:\n• ${res.warnings.slice(0, 5).join('\n• ')}`);
-      dialog.alert(parts.join('\n'), { title: 'Enviado con avisos' });
-    }
-    load();
-  };
-
   const handleRefresh = async (id) => {
     setBusy(id);
     const res = await window.api?.campaigns?.refreshStats(id);
     setBusy(null);
     if (res?.ok && res.campaign) setCampaigns(prev => prev.map(x => x.id === id ? res.campaign : x));
-  };
-
-  const handleCancel = async (id) => {
-    if (!(await dialog.confirm('¿Cancelar la programación? Vuelve a borrador.'))) return;
-    setBusy(id);
-    await window.api?.campaigns?.cancel(id);
-    setBusy(null);
-    load();
   };
 
   const handleDelete = async (id) => {
@@ -521,7 +483,6 @@ export default function Campaigns() {
         <div className="space-y-3">
           {campaigns.map(c => {
             const total = c.total_recipients || c.total_contacts || 0;
-            const progress = total ? Math.round(((c.sent_count + c.error_count) / total) * 100) : 0;
             return (
               <div key={c.id} className="bg-gray-800 border border-gray-700 rounded-xl px-5 py-4">
                 <div className="flex items-center gap-4">

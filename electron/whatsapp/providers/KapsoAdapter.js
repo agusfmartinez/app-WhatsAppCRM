@@ -12,10 +12,13 @@ function apiLogger() {
 }
 let _isDev = true;
 try { _isDev = !require('electron').app?.isPackaged; } catch {}
+function stamp() {
+  return new Date().toLocaleString('es-AR', { hour12: false });
+}
 function traceApi(method, url, status, ms, error) {
   const path = String(url).replace('https://api.kapso.ai', '').split('?')[0];
   const line = `${method} ${path} → ${status}${error ? ' ERR' : ''} (${ms}ms)`;
-  if (_isDev) console.log('[kapso-api]', line + (error ? ` ${error}` : ''));
+  if (_isDev) console.log(`${stamp()} [kapso-api]`, line + (error ? ` ${error}` : ''));
   try { apiLogger()?.info(line, { method, status, ms, error: error ? String(error).slice(0, 200) : undefined }); } catch {}
 }
 // fetch wrapper that traces method/url/status/duration (rethrows so callers handle errors)

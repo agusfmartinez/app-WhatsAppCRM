@@ -103,6 +103,62 @@ function Message({ msg }) {
   );
 }
 
+function InfoRow({ label, value, mono }) {
+  return (
+    <div className="mb-3">
+      <div className="text-[10px] text-gray-500 uppercase tracking-wide">{label}</div>
+      <div className={`text-sm text-gray-200 mt-0.5 break-words ${mono ? 'font-mono' : ''}`}>{value || '—'}</div>
+    </div>
+  );
+}
+
+// Conversation details side panel — uses already-loaded data (no extra API call)
+function InfoPanel({ conv, local, onClose }) {
+  const status = conv.status === 'ended' ? 'Cerrada' : 'Activa';
+  const fmt = (t) => t ? new Date(t).toLocaleString('es-AR') : null;
+  return (
+    <div className="w-72 shrink-0 border-l border-gray-800 overflow-y-auto p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-white">Detalles</h3>
+        <button onClick={onClose} className="text-gray-500 hover:text-gray-300">
+          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div className="text-[10px] text-gray-400 uppercase tracking-wide mb-2">Contacto</div>
+      <InfoRow label="Nombre" value={local?.name || conv.contact_name} />
+      <InfoRow label="Teléfono" value={conv.phone_number} mono />
+      {conv.business_scoped_user_id && <InfoRow label="BSUID" value={conv.business_scoped_user_id} mono />}
+      {local?.company && <InfoRow label="Empresa" value={local.company} />}
+      {local?.email && <InfoRow label="Email" value={local.email} />}
+      {local?.tags?.length > 0 && (
+        <div className="mb-3">
+          <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Etiquetas</div>
+          <div className="flex flex-wrap gap-1">
+            {local.tags.map(t => (
+              <span key={t.id} className="rounded-full px-2 py-0.5 text-[10px]" style={{ backgroundColor: t.color + '22', color: t.color }}>{t.name}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="border-t border-gray-800 my-3" />
+      <div className="text-[10px] text-gray-400 uppercase tracking-wide mb-2">Conversación</div>
+      <InfoRow label="Estado" value={status} />
+      <InfoRow label="Creada" value={fmt(conv.created_at)} />
+      <InfoRow label="Última actividad" value={fmt(conv.last_active_at)} />
+
+      {local?.notes && (
+        <>
+          <div className="border-t border-gray-800 my-3" />
+          <div className="text-[10px] text-gray-400 uppercase tracking-wide mb-1">Notas</div>
+          <p className="text-sm text-gray-300 whitespace-pre-wrap break-words">{local.notes}</p>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function Inbox() {
   const { state } = useLocation();
   const [conversations, setConversations] = useState([]);
@@ -114,6 +170,7 @@ export default function Inbox() {
   });
   const [localContacts, setLocalContacts] = useState({}); // phone → contact
   const [active, setActive] = useState(null);
+  const [showInfo, setShowInfo] = useState(false);
   const [messages, setMessages] = useState([]);
   const [msgsCursor, setMsgsCursor] = useState(null); // cursor for older messages
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -239,6 +296,9 @@ export default function Inbox() {
     window.api?.setActiveConversation?.(active?.id || null);
     return () => window.api?.setActiveConversation?.(null);
   }, [active]);
+
+  // Close the details panel when switching conversations
+  useEffect(() => { setShowInfo(false); }, [active?.id]);
 
   // Auto-select from Contacts (filterPhone) — one-shot on first nav
   useEffect(() => {
@@ -377,6 +437,7 @@ export default function Inbox() {
 
       {/* Chat area */}
       {active ? (
+        <div className="flex-1 flex min-w-0">
         <div className="flex-1 flex flex-col min-w-0">
           {/* Header */}
           <div className="px-5 py-3.5 border-b border-gray-800 flex items-center gap-3">
@@ -400,6 +461,11 @@ export default function Inbox() {
                 </>
               );
             })()}
+            <div className="flex-1" />
+            <button onClick={() => setShowInfo(s => !s)} title="Detalles de la conversación"
+              className={`p-2 rounded-lg transition-colors ${showInfo ? 'text-green-400 bg-gray-800' : 'text-gray-500 hover:text-gray-200 hover:bg-gray-800'}`}>
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="9"/><path strokeLinecap="round" strokeLinejoin="round" d="M12 16v-4M12 8h.01"/></svg>
+            </button>
           </div>
 
           {/* Messages */}
@@ -449,6 +515,10 @@ export default function Inbox() {
               </svg>
             </button>
           </form>
+        </div>
+        {showInfo && (
+          <InfoPanel conv={active} local={localContacts[normPhone(active.phone_number)]} onClose={() => setShowInfo(false)} />
+        )}
         </div>
       ) : (
         <div className="flex-1 flex items-center justify-center">
