@@ -618,13 +618,34 @@ function initCrm(ipcMain, waManager) {
 
   // ─── Dashboard stats ──────────────────────────────────────────────────────
 
-  ipcMain.handle('crm:stats', () => ({
-    contacts: first(`SELECT COUNT(*) AS n FROM contacts`)?.n ?? 0,
-    campaigns: first(`SELECT COUNT(*) AS n FROM campaigns WHERE status='sent'`)?.n ?? 0,
-    // messages now come from Kapso API, not local DB
-    messagesSent: null,
-    messagesIn: null,
-  }));
+  ipcMain.handle('crm:stats', () => {
+    const contacts = first(`SELECT COUNT(*) AS n FROM contacts`)?.n ?? 0;
+    const campaignsTotal = first(`SELECT COUNT(*) AS n FROM campaigns`)?.n ?? 0;
+    const campaignsSent = first(`SELECT COUNT(*) AS n FROM campaigns WHERE kapso_broadcast_id IS NOT NULL`)?.n ?? 0;
+    // Aggregate broadcast metrics snapshotted locally per campaign
+    const a = first(`
+      SELECT COALESCE(SUM(sent_count),0) AS sent, COALESCE(SUM(delivered_count),0) AS delivered,
+             COALESCE(SUM(read_count),0) AS reads, COALESCE(SUM(responded_count),0) AS responded,
+             COALESCE(SUM(error_count),0) AS errors
+      FROM campaigns WHERE kapso_broadcast_id IS NOT NULL
+    `) || {};
+    const sent = a.sent || 0;
+    return {
+      contacts,
+      tags: first(`SELECT COUNT(*) AS n FROM tags`)?.n ?? 0,
+      campaigns: campaignsTotal,
+      campaignsSent,
+      messagesSent: sent,
+      delivered: a.delivered || 0,
+      read: a.reads || 0,
+      responded: a.responded || 0,
+      errors: a.errors || 0,
+      responseRate: sent ? Math.round((a.responded / sent) * 100) : 0,
+      deliveryRate: sent ? Math.round((a.delivered / sent) * 100) : 0,
+      readRate: sent ? Math.round((a.reads / sent) * 100) : 0,
+      messagesIn: null, // inbound no se trackea local (vive en Kapso)
+    };
+  });
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

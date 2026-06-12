@@ -18,15 +18,9 @@ export default function Reports() {
 
   useEffect(() => {
     window.api?.stats?.().then(setStats).catch(() => {});
-    window.api?.campaigns?.list().then(c => setCampaigns((c || []).filter(x => x.status === 'sent'))).catch(() => {});
+    // Campañas con broadcast (enviadas), más recientes primero
+    window.api?.campaigns?.list().then(c => setCampaigns((c || []).filter(x => x.kapso_broadcast_id))).catch(() => {});
   }, []);
-
-  const responseRate = stats?.messagesIn && stats?.messagesSent
-    ? ((stats.messagesIn / stats.messagesSent) * 100).toFixed(1)
-    : '0';
-
-  const totalSentCampaigns = campaigns.reduce((a, c) => a + (c.sent_count || 0), 0);
-  const totalErrorsCampaigns = campaigns.reduce((a, c) => a + (c.error_count || 0), 0);
 
   return (
     <div className="p-8">
@@ -40,10 +34,13 @@ export default function Reports() {
         <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
           <h2 className="text-sm font-semibold text-gray-200 mb-4">Resumen general</h2>
           <StatRow label="Contactos totales" value={stats?.contacts ?? '…'} />
-          <StatRow label="Mensajes enviados" value={stats?.messagesSent ?? '…'} sub="Total histórico" />
-          <StatRow label="Mensajes recibidos" value={stats?.messagesIn ?? '…'} />
-          <StatRow label="Tasa de respuesta" value={`${responseRate}%`} sub="Respuestas / enviados" />
-          <StatRow label="Campañas enviadas" value={campaigns.length} />
+          <StatRow label="Etiquetas" value={stats?.tags ?? '…'} />
+          <StatRow label="Mensajes enviados" value={stats?.messagesSent ?? '…'} sub="Total en campañas" />
+          <StatRow label="Entregados" value={stats?.delivered ?? '…'} sub={`${stats?.deliveryRate ?? 0}% de enviados`} />
+          <StatRow label="Leídos" value={stats?.read ?? '…'} sub={`${stats?.readRate ?? 0}% de enviados`} />
+          <StatRow label="Respondieron" value={stats?.responded ?? '…'} sub={`${stats?.responseRate ?? 0}% tasa de respuesta`} />
+          <StatRow label="Errores" value={stats?.errors ?? '…'} />
+          <StatRow label="Campañas enviadas" value={stats?.campaignsSent ?? campaigns.length} />
         </div>
 
         {/* Campaign detail */}
@@ -52,21 +49,28 @@ export default function Reports() {
           {campaigns.length === 0 ? (
             <p className="text-sm text-gray-500 text-center py-8">Sin campañas enviadas</p>
           ) : (
-            <>
-              <StatRow label="Mensajes enviados (campañas)" value={totalSentCampaigns} />
-              <StatRow label="Errores" value={totalErrorsCampaigns} />
-              <div className="mt-4 space-y-2">
-                {campaigns.slice(0, 5).map(c => (
-                  <div key={c.id} className="flex items-center justify-between text-sm">
-                    <span className="text-gray-400 truncate flex-1 mr-3">{c.name}</span>
-                    <span className="text-gray-300 shrink-0">{c.sent_count}/{c.total_contacts}</span>
+            <div className="space-y-3">
+              {campaigns.slice(0, 8).map(c => {
+                const total = c.total_recipients || c.total_contacts || 0;
+                return (
+                  <div key={c.id}>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-200 truncate flex-1 mr-3">{c.name}</span>
+                      <span className="text-gray-400 shrink-0 text-xs">{c.sent_count}/{total} enviados</span>
+                    </div>
+                    <div className="flex items-center gap-3 mt-0.5 text-[11px] text-gray-500">
+                      <span className="text-green-500">{c.delivered_count} entregados</span>
+                      <span className="text-blue-400">{c.read_count} leídos</span>
+                      <span className="text-blue-400">{c.responded_count} resp.</span>
+                      {c.error_count > 0 && <span className="text-red-400">{c.error_count} errores</span>}
+                    </div>
                   </div>
-                ))}
-                {campaigns.length > 5 && (
-                  <p className="text-xs text-gray-500 text-center pt-1">+{campaigns.length - 5} más</p>
-                )}
-              </div>
-            </>
+                );
+              })}
+              {campaigns.length > 8 && (
+                <p className="text-xs text-gray-500 text-center pt-1">+{campaigns.length - 8} más</p>
+              )}
+            </div>
           )}
         </div>
       </div>

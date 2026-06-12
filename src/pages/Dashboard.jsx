@@ -27,9 +27,7 @@ export default function Dashboard() {
     return () => window.api?.offWhatsAppEvent?.(handler);
   }, []);
 
-  const responseRate = stats?.messagesIn && stats?.messagesSent
-    ? Math.round((stats.messagesIn / stats.messagesSent) * 100)
-    : 0;
+  const responseRate = stats?.responseRate ?? 0;
 
   return (
     <div className="p-8">
