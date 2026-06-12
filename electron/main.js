@@ -12,6 +12,7 @@ const { autoUpdater } = require("electron-updater");
 let win;
 let splash;
 let activeConvId = null;
+let notifyEnabled = false; // background message notifications are opt-in
 let appLogger;
 let ipcLogger;
 let securityLogger;
@@ -323,9 +324,17 @@ app.whenReady().then(async () => {
   initAutoUpdate();
 
   // Local near-real-time inbox: notify on new inbound messages (no server).
+  // Opt-in (default off): no background polling unless the user enables it.
+  try {
+    const { getDb } = require('./db/database');
+    const stmt = getDb().prepare("SELECT value FROM settings WHERE key='notify_new_messages'");
+    if (stmt.step()) { const v = stmt.getAsObject().value; notifyEnabled = v === 'true' || v === true; }
+    stmt.free();
+  } catch {}
   // The renderer reports which conversation is open so we don't notify it when focused.
   ipcMain.on('inbox:set-active', (_e, id) => { activeConvId = id || null; });
-  startInboxPoller(waManager, () => win, appLogger, () => activeConvId);
+  ipcMain.on('inbox:set-notify', (_e, val) => { notifyEnabled = !!val; });
+  startInboxPoller(waManager, () => win, appLogger, () => activeConvId, () => notifyEnabled);
 
   win.once('ready-to-show', () => {
     if (splash) splash.close();

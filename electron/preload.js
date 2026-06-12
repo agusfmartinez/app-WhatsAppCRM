@@ -136,6 +136,8 @@ contextBridge.exposeInMainWorld('api', {
 
   // Tell main which inbox conversation is open (to skip notifying it when focused)
   setActiveConversation: (id) => ipcRenderer.send('inbox:set-active', id),
+  // Enable/disable background new-message notifications (opt-in)
+  setNotify: (enabled) => ipcRenderer.send('inbox:set-notify', enabled),
 });
 
 contextBridge.exposeInMainWorld('updater', {

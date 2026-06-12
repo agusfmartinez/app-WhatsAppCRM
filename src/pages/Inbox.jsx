@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 
 const POLL_INTERVAL = 30_000;       // conversation list
-const ACTIVE_POLL_INTERVAL = 5_000; // open conversation — fast for chat-like feel (API reads are free)
+const ACTIVE_POLL_INTERVAL = 8_000; // open conversation — only while viewing it
 const WINDOW_MS = 24 * 60 * 60 * 1000; // WhatsApp customer-service window
 const LAST_READ_KEY = 'inbox:lastRead';
 

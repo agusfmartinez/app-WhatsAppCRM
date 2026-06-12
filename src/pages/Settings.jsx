@@ -73,6 +73,7 @@ export default function Settings() {
   const [displayName, setDisplayName] = useState('');
   const [submittingName, setSubmittingName] = useState(false);
   const [displayRequests, setDisplayRequests] = useState([]);
+  const [notifyMsgs, setNotifyMsgs] = useState(false);
 
   useEffect(() => {
     window.api?.getAppInfo?.().then(setAppInfo).catch(() => {});
@@ -91,6 +92,7 @@ export default function Settings() {
       if (s.wa_business_account_id) setBusinessAccountId(s.wa_business_account_id);
       if (s.campaign_delay) setDelay(String(s.campaign_delay));
       if (s.campaign_batch) setBatchSize(String(s.campaign_batch));
+      setNotifyMsgs(s.notify_new_messages === true);
     }).catch(() => {});
 
     const handler = (e) => {
@@ -193,6 +195,12 @@ export default function Settings() {
     try { localStorage.removeItem('wa_number_name'); } catch {}
   };
 
+  const toggleNotify = (val) => {
+    setNotifyMsgs(val);
+    window.api?.settings?.set('notify_new_messages', val);
+    window.api?.setNotify?.(val);
+  };
+
   return (
     // <div className="p-8 max-w-2xl space-y-6">
     <div className="p-8">
@@ -240,6 +248,18 @@ export default function Settings() {
                 <ReadOnly label="Nombre verificado" value={phoneDetails?.verified_name} />
                 <ReadOnly label="Phone Number ID" value={apiUrl} mono />
                 <ReadOnly label="Business Account ID" value={businessAccountId} mono />
+              </div>
+
+              {/* New-message notifications (opt-in) */}
+              <div className="flex items-center justify-between rounded-lg border border-gray-700 px-4 py-3">
+                <div>
+                  <p className="text-sm text-gray-200">Notificar mensajes nuevos</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5">Consulta mensajes en segundo plano cada 30s. Desactivado = sin llamadas cuando no estás en Conversaciones.</p>
+                </div>
+                <button onClick={() => toggleNotify(!notifyMsgs)} role="switch" aria-checked={notifyMsgs}
+                  className={`relative h-6 w-11 rounded-full transition-colors shrink-0 ${notifyMsgs ? 'bg-green-600' : 'bg-gray-700'}`}>
+                  <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${notifyMsgs ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                </button>
               </div>
 
               {/* Editar Display name (Meta review) */}

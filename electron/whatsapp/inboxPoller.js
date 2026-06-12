@@ -10,14 +10,15 @@ const { Notification } = require('electron');
  * @param {object} logger
  * @returns {() => void} stop function
  */
-function startInboxPoller(waManager, getWin, logger, getActiveConvId) {
-  const POLL_MS = 20_000;
+function startInboxPoller(waManager, getWin, logger, getActiveConvId, getEnabled) {
+  const POLL_MS = 30_000;
   let lastSeen = 0;      // newest inbound timestamp (unix seconds) we've already handled
   let primed = false;    // first tick only sets the baseline (no notifications for history)
   let inFlight = false;
 
   async function tick() {
     if (inFlight) return;
+    if (getEnabled && !getEnabled()) { primed = false; return; } // opt-in: off → no polling
     if (waManager.getStatus?.().status !== 'connected') return;
     inFlight = true;
     try {
