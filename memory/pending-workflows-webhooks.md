@@ -34,4 +34,9 @@ Dos features futuras **a analizar factibilidad y enfoque** (no implementar aún)
 
 - Decisión: **NO backend propio hasta ser redituable**. Todo local en la PC del cliente.
 - Implementado: poller en el main (20s) → notificación nativa Electron + evento al renderer; conversación abierta pollea cada 5s (pausada si ventana oculta); lista 30s. Las API reads **no consumen** la cuota de 2000 msgs (solo cuentan mensajes WA). Se siente tipo WhatsApp Web. Push real recién con relay/Functions+WS (futuro).
-- **Pendiente:** toggle en Settings para **activar/desactivar notificaciones de chats**. Guardar en settings y que el poller del main lo respete (o que el renderer ignore). Considerar también silenciar notif cuando la ventana está enfocada en esa conversación.
+- ✅ HECHO: toggle en Settings para activar/desactivar notificaciones (opt-in, default off); poller respeta el flag; silencia si la conversación está abierta y visible.
+
+## Pendientes UI/UX varios (jun 2026)
+
+- **Timestamp en los logs de consola dev:** el archivo `app.log`/`kapso-api.log` ya tiene timestamp ISO, pero los `console.log` (`[kapso-api]`, `[inbox-poller]`) NO. Agregar prefijo de fecha/hora a esos console logs para ver cuándo pasó cada cosa.
+- **Detalles de la conversación (Inbox):** botón en el **header del chat** que abre un **panel lateral** con datos de la conversación (estilo inbox de Kapso): nombre/teléfono/BSUID del contacto, `last_seen_at`, estado (si fue **cerrada/ended**), assignment, notas. Ver `get-conversation` de Kapso (Platform v1) para los campos.
